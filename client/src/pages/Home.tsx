@@ -1,32 +1,205 @@
+import {
+  AlertTriangle,
+  ArrowDownLeft,
+  ArrowUpLeft,
+  Bell,
+  Building2,
+  CalendarDays,
+  CheckCircle2,
+  ChevronLeft,
+  ClipboardCheck,
+  Clock3,
+  FileText,
+  Filter,
+  Gauge,
+  LayoutDashboard,
+  MapPin,
+  MoreHorizontal,
+  PackageCheck,
+  Plus,
+  Search,
+  Settings2,
+  ShieldCheck,
+  Sparkles,
+  Wrench,
+  X,
+} from "lucide-react";
+import { useMemo, useState } from "react";
 import { useAuth } from "@/_core/hooks/useAuth";
+import { trpc } from "@/lib/trpc";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Loader2 } from "lucide-react";
-import { Streamdown } from 'streamdown';
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Progress } from "@/components/ui/progress";
+import { Separator } from "@/components/ui/separator";
 
-/**
- * All content in this page are only for example, replace with your own feature implementation
- * When building pages, remember your instructions in Frontend Workflow, Frontend Best Practices, Design Guide and Common Pitfalls
- */
+const branches = [
+  { name: "فرع العليا", area: "الرياض الوسطى", score: 94, status: "مستقر", color: "emerald", tasks: 3, risk: "منخفض" },
+  { name: "فرع التحلية", area: "الرياض الوسطى", score: 88, status: "يحتاج متابعة", color: "amber", tasks: 7, risk: "متوسط" },
+  { name: "فرع النخيل", area: "الرياض الشمال", score: 96, status: "ممتاز", color: "emerald", tasks: 2, risk: "منخفض" },
+  { name: "فرع الملقا", area: "الرياض الشمال", score: 79, status: "إجراء مطلوب", color: "rose", tasks: 11, risk: "مرتفع" },
+  { name: "فرع الروضة", area: "جدة", score: 91, status: "مستقر", color: "emerald", tasks: 4, risk: "منخفض" },
+  { name: "فرع الشاطئ", area: "جدة", score: 84, status: "يحتاج متابعة", color: "amber", tasks: 8, risk: "متوسط" },
+];
+
+const alerts = [
+  { icon: FileText, title: "رخصة نشاط تقترب من الانتهاء", detail: "فرع الملقا · خلال 14 يومًا", tone: "rose" },
+  { icon: Wrench, title: "عطل مفتوح منذ 3 أيام", detail: "آلة طحن رئيسية · فرع التحلية", tone: "amber" },
+  { icon: ClipboardCheck, title: "زيارة ميدانية مجدولة غدًا", detail: "المشرف: أحمد السالم · فرع الشاطئ", tone: "blue" },
+];
+
+const navItems = [
+  { label: "نظرة عامة", icon: LayoutDashboard },
+  { label: "الفروع", icon: Building2 },
+  { label: "الزيارات والفحص", icon: ClipboardCheck },
+  { label: "الإجراءات والتحسين", icon: ShieldCheck },
+  { label: "الوثائق والتراخيص", icon: FileText },
+  { label: "الجودة والشكاوى", icon: CheckCircle2 },
+  { label: "الصيانة والأصول", icon: Wrench },
+  { label: "التقارير", icon: Gauge },
+];
+
+function canAccessNav(label: string, role?: string) {
+  if (!role || role === "admin" || role === "area_manager") return true;
+  if (role === "branch_manager") return !["التقارير"].includes(label);
+  if (role === "quality") return ["نظرة عامة", "الفروع", "الزيارات والفحص", "الإجراءات والتحسين", "الوثائق والتراخيص", "الجودة والشكاوى"].includes(label);
+  if (role === "maintenance") return ["نظرة عامة", "الفروع", "الإجراءات والتحسين", "الصيانة والأصول"].includes(label);
+  if (role === "warehouse" || role === "factory") return ["نظرة عامة", "الفروع", "الإجراءات والتحسين"].includes(label);
+  return ["نظرة عامة", "الفروع"].includes(label);
+}
+
+function statusClasses(color: string) {
+  return {
+    emerald: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    amber: "bg-amber-50 text-amber-700 border-amber-200",
+    rose: "bg-rose-50 text-rose-700 border-rose-200",
+    blue: "bg-blue-50 text-blue-700 border-blue-200",
+  }[color] || "bg-slate-50 text-slate-700 border-slate-200";
+}
+
 export default function Home() {
-  // The useAuth hook provides authentication state.
-  // To implement login/logout, call logout(), or start login from an event
-  // handler: onClick={() => startLogin()} (imported from "@/const"). Never call
-  // startLogin() during render (no href={startLogin()}) — it mints a one-time
-  // nonce cookie and must run only at the moment of navigation.
-  let { user, loading, error, isAuthenticated, logout } = useAuth();
-
-  // If theme is switchable in App.tsx, we can implement theme toggling like this:
-  // const { theme, toggleTheme } = useTheme();
+  const [activeNav, setActiveNav] = useState("نظرة عامة");
+  const [query, setQuery] = useState("");
+  const [showQuickAction, setShowQuickAction] = useState(false);
+  const [showAllAlerts, setShowAllAlerts] = useState(false);
+  const [selectedBranch, setSelectedBranch] = useState<(typeof branches)[number] | null>(null);
+  const { user } = useAuth();
+  const { data: liveSummary } = trpc.dashboard.summary.useQuery(undefined, { enabled: Boolean(user) });
+  const displayBranches = useMemo(() => {
+    if (!liveSummary?.branches?.length) return branches;
+    return liveSummary.branches.map((branch) => {
+      const score = Number(branch.healthScore);
+      return {
+        name: branch.name,
+        area: `${branch.city} · ${branch.region}`,
+        score,
+        status: score >= 92 ? "ممتاز" : score >= 85 ? "مستقر" : "يحتاج متابعة",
+        color: score >= 85 ? "emerald" : score >= 75 ? "amber" : "rose",
+        tasks: branch.openActions,
+        risk: branch.riskLevel === "high" ? "مرتفع" : branch.riskLevel === "medium" ? "متوسط" : "منخفض",
+      };
+    });
+  }, [liveSummary]);
+  const filteredBranches = useMemo(
+    () => displayBranches.filter((branch) => `${branch.name} ${branch.area}`.includes(query.trim())),
+    [displayBranches, query],
+  );
 
   return (
-    <div className="min-h-screen flex flex-col">
-      <main>
-        {/* Example: lucide-react for icons */}
-        <Loader2 className="animate-spin" />
-        Example Page
-        {/* Example: Streamdown for markdown rendering */}
-        <Streamdown>Any **markdown** content</Streamdown>
-        <Button variant="default">Example Button</Button>
+    <div dir="rtl" className="min-h-screen bg-[#f6f7f4] text-[#17211b]">
+      <aside className="fixed inset-y-0 right-0 z-30 hidden w-[258px] border-l border-[#dfe6df] bg-[#fbfcfa] lg:flex lg:flex-col">
+        <div className="flex h-[78px] items-center gap-3 border-b border-[#e6ebe5] px-6">
+          <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#174c3d] text-white shadow-lg shadow-[#174c3d]/20">
+            <Sparkles className="h-5 w-5" />
+          </div>
+          <div>
+            <p className="text-[15px] font-bold tracking-tight">مرصد الفروع</p>
+            <p className="text-[11px] text-[#758178]">Branch Operations Hub</p>
+          </div>
+        </div>
+        <div className="px-4 pt-6">
+          <p className="mb-3 px-3 text-[11px] font-semibold tracking-[0.16em] text-[#8a968d]">مساحة العمل</p>
+          <nav className="space-y-1">
+            {navItems.filter((item) => canAccessNav(item.label, user?.role)).map((item) => {
+              const Icon = item.icon;
+              const active = activeNav === item.label;
+              return (
+                <button
+                  key={item.label}
+                  onClick={() => setActiveNav(item.label)}
+                  className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-right text-[13px] transition-all ${active ? "bg-[#e4f1e9] font-bold text-[#174c3d] shadow-sm" : "text-[#637066] hover:bg-[#f0f4ef] hover:text-[#174c3d]"}`}
+                >
+                  <Icon className={`h-[17px] w-[17px] ${active ? "text-[#1f7555]" : "text-[#8a968d]"}`} />
+                  <span>{item.label}</span>
+                  {item.label === "الإجراءات والتحسين" && <span className="mr-auto rounded-full bg-[#ffe6c4] px-2 py-0.5 text-[10px] font-bold text-[#a65d1b]">24</span>}
+                </button>
+              );
+            })}
+          </nav>
+        </div>
+        <div className="mt-auto p-4">
+          <div className="rounded-2xl bg-[#174c3d] p-4 text-white shadow-xl shadow-[#174c3d]/15">
+            <div className="mb-3 flex items-center justify-between">
+              <span className="rounded-full bg-white/15 px-2 py-1 text-[10px]">تحديث مباشر</span>
+              <div className="h-2 w-2 rounded-full bg-[#a7e4a8] shadow-[0_0_0_4px_rgba(167,228,168,0.14)]" />
+            </div>
+            <p className="text-sm font-bold">كل شيء تحت السيطرة</p>
+            <p className="mt-1 text-[11px] leading-5 text-white/65">آخر مزامنة للبيانات قبل 4 دقائق</p>
+          </div>
+        </div>
+      </aside>
+
+      <main className="lg:mr-[258px]">
+        <header className="sticky top-0 z-20 border-b border-[#e1e7e1] bg-[#f6f7f4]/90 px-5 py-4 backdrop-blur-xl md:px-8">
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="lg:hidden flex h-10 w-10 items-center justify-center rounded-xl bg-[#174c3d] text-white"><Sparkles className="h-5 w-5" /></div>
+              <div>
+                <p className="hidden text-xs font-medium text-[#7a857c] sm:block">الأحد، 18 أغسطس 2026</p>
+                <h1 className="text-xl font-bold tracking-tight text-[#17211b] md:text-2xl">صباح الخير، فريق التشغيل</h1>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="relative hidden md:block"><Search className="absolute right-3 top-2.5 h-4 w-4 text-[#98a39a]" /><Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="ابحث عن فرع أو منطقة..." className="h-9 w-56 rounded-xl border-[#dce5dc] bg-white pr-9 text-xs shadow-none focus-visible:ring-[#6ea787]" /></div>
+              <Button variant="outline" size="icon" className="h-9 w-9 rounded-xl border-[#dce5dc] bg-white text-[#66736a]"><Bell className="h-4 w-4" /><span className="absolute mr-5 mt-[-15px] h-2 w-2 rounded-full bg-[#e48552]" /></Button>
+              <div className="hidden h-9 items-center gap-2 rounded-xl border border-[#dce5dc] bg-white px-2.5 sm:flex"><div className="flex h-6 w-6 items-center justify-center rounded-lg bg-[#dcefe3] text-[10px] font-bold text-[#1f7555]">م</div><span className="text-xs font-semibold">مدير التشغيل</span><ChevronLeft className="h-3 w-3 rotate-[-90deg] text-[#9aa49c]" /></div>
+            </div>
+          </div>
+        </header>
+
+        <div className="space-y-6 px-5 py-6 md:px-8 md:py-8">
+          <section className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
+            <div><div className="mb-2 flex items-center gap-2 text-xs font-semibold text-[#4d8068]"><span className="h-2 w-2 rounded-full bg-[#5cab7c]" /> حالة الشبكة مستقرة</div><h2 className="text-2xl font-bold tracking-tight md:text-[30px]">نظرة عامة على الفروع</h2><p className="mt-2 text-sm text-[#7a857c]">متابعة تشغيلية موحدة لـ 9 فروع، مع التركيز على ما يحتاج قرارًا اليوم.</p></div>
+            <div className="flex gap-2"><Button variant="outline" className="h-10 rounded-xl border-[#dce5dc] bg-white text-xs"><CalendarDays className="ml-2 h-4 w-4 text-[#5e806c]" /> هذا الشهر</Button><Button onClick={() => setShowQuickAction(!showQuickAction)} className="h-10 rounded-xl bg-[#174c3d] text-xs text-white shadow-lg shadow-[#174c3d]/15 hover:bg-[#23634f]"><Plus className="ml-2 h-4 w-4" /> إجراء سريع</Button></div>
+          </section>
+
+          {showQuickAction && <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-[#cde1d3] bg-[#edf8f0] p-3 text-sm"><span className="ml-2 font-semibold text-[#174c3d]">إجراء سريع:</span><Button variant="outline" size="sm" className="rounded-lg border-[#bed8c5] bg-white text-xs"><ClipboardCheck className="ml-1 h-3.5 w-3.5" /> جدولة زيارة</Button><Button variant="outline" size="sm" className="rounded-lg border-[#bed8c5] bg-white text-xs"><Wrench className="ml-1 h-3.5 w-3.5" /> فتح بلاغ صيانة</Button><Button variant="outline" size="sm" className="rounded-lg border-[#bed8c5] bg-white text-xs"><FileText className="ml-1 h-3.5 w-3.5" /> رفع وثيقة</Button><button onClick={() => setShowQuickAction(false)} className="mr-auto rounded-lg p-1 text-[#6b8a75] hover:bg-white"><X className="h-4 w-4" /></button></div>}
+
+          <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            {[
+              { label: "مؤشر صحة الفروع", value: "89.4%", change: "+4.2%", hint: "مقارنة بالشهر الماضي", icon: Gauge, tone: "green", progress: 89 },
+              { label: "إجراءات مفتوحة", value: liveSummary ? String(liveSummary.openActions) : "24", change: liveSummary ? `${liveSummary.openMaintenance} صيانة` : "7 عاجلة", hint: "تحتاج متابعة اليوم", icon: ShieldCheck, tone: "orange", progress: liveSummary ? Math.min(100, liveSummary.openActions * 4) : 62 },
+              { label: "الزيارات المجدولة", value: liveSummary ? String(liveSummary.upcomingVisits) : "38 / 45", change: liveSummary ? "قادمة" : "84%", hint: "من خطة المتابعة", icon: ClipboardCheck, tone: "blue", progress: liveSummary ? Math.min(100, liveSummary.upcomingVisits * 10) : 84 },
+              { label: "وثائق تحتاج انتباه", value: liveSummary ? String(liveSummary.expiringDocuments).padStart(2, "0") : "08", change: "تنبيه مبكر", hint: "تراخيص وعقود", icon: FileText, tone: "purple", progress: liveSummary ? Math.min(100, liveSummary.expiringDocuments * 12) : 35 },
+            ].map((item) => { const Icon = item.icon; return <Card key={item.label} className="border-[#e2e9e2] bg-white shadow-[0_5px_18px_rgba(39,70,48,0.04)]"><CardContent className="p-5"><div className="flex items-start justify-between"><div className={`flex h-10 w-10 items-center justify-center rounded-xl ${item.tone === "green" ? "bg-[#e2f3e7] text-[#2c8a5f]" : item.tone === "orange" ? "bg-[#fff0dc] text-[#c47629]" : item.tone === "blue" ? "bg-[#e5f0fa] text-[#4d83b0]" : "bg-[#eee9fa] text-[#7658a9]"}`}><Icon className="h-5 w-5" /></div><button className="text-[#acb6ad] hover:text-[#637066]"><MoreHorizontal className="h-5 w-5" /></button></div><p className="mt-4 text-xs font-medium text-[#7b877d]">{item.label}</p><div className="mt-1 flex items-end justify-between gap-2"><p className="text-[25px] font-bold tracking-tight text-[#1c2820]">{item.value}</p><span className={`mb-1 text-[11px] font-bold ${item.tone === "orange" || item.tone === "purple" ? "text-[#c47629]" : "text-[#39865d]"}`}>{item.change}</span></div><Progress value={item.progress} className="mt-4 h-1.5 bg-[#eef2ee]" /><p className="mt-2 text-[11px] text-[#99a39a]">{item.hint}</p></CardContent></Card> })}
+          </section>
+
+          <section className="grid gap-5 xl:grid-cols-[1.45fr_0.9fr]">
+            <Card className="border-[#e2e9e2] bg-white shadow-[0_5px_18px_rgba(39,70,48,0.04)]"><CardHeader className="flex flex-row items-center justify-between space-y-0 px-5 pb-3 pt-5"><div><CardTitle className="text-base">صحة الفروع</CardTitle><p className="mt-1 text-xs text-[#89948b]">ترتيب الفروع حسب المؤشر التشغيلي العام</p></div><Button variant="ghost" size="sm" className="rounded-lg text-xs text-[#4d8068]" onClick={() => setActiveNav("الفروع")}>عرض الكل <ArrowDownLeft className="mr-1 h-3.5 w-3.5" /></Button></CardHeader><CardContent className="px-5 pb-5"><div className="overflow-x-auto"><table className="w-full min-w-[640px] text-right"><thead><tr className="border-b border-[#edf1ed] text-[11px] text-[#97a198]"><th className="pb-3 font-medium">الفرع</th><th className="pb-3 font-medium">الحالة</th><th className="pb-3 font-medium">الصحة التشغيلية</th><th className="pb-3 font-medium">المخاطر</th><th className="pb-3 font-medium">إجراءات</th><th className="pb-3"></th></tr></thead><tbody>{filteredBranches.map((branch) => <tr key={branch.name} onClick={() => setSelectedBranch(branch)} className="group cursor-pointer border-b border-[#f0f3f0] last:border-0 hover:bg-[#fbfdfb]"><td className="py-3.5"><div className="flex items-center gap-3"><div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#edf3ed] text-[#588069]"><Building2 className="h-4 w-4" /></div><div><p className="text-[13px] font-semibold">{branch.name}</p><p className="mt-0.5 flex items-center gap-1 text-[10px] text-[#9aa49c]"><MapPin className="h-3 w-3" /> {branch.area}</p></div></div></td><td><Badge variant="outline" className={`rounded-full px-2 py-1 text-[10px] font-medium ${statusClasses(branch.color)}`}>{branch.status}</Badge></td><td><div className="flex items-center gap-2"><span className="w-8 text-[13px] font-bold">{branch.score}%</span><div className="w-20"><Progress value={branch.score} className="h-1.5 bg-[#edf2ed]" /></div></div></td><td><span className={`text-[11px] font-semibold ${branch.risk === "مرتفع" ? "text-[#c95f52]" : branch.risk === "متوسط" ? "text-[#c27d2f]" : "text-[#4f8c67]"}`}>{branch.risk}</span></td><td><span className="rounded-md bg-[#f3f5f3] px-2 py-1 text-[11px] text-[#67746a]">{branch.tasks} مفتوحة</span></td><td><button className="invisible rounded-md p-1 text-[#9ca89e] group-hover:visible hover:bg-[#f1f5f1]"><ChevronLeft className="h-4 w-4" /></button></td></tr>)}</tbody></table></div></CardContent></Card>
+
+            <Card className="border-[#e2e9e2] bg-white shadow-[0_5px_18px_rgba(39,70,48,0.04)]"><CardHeader className="flex flex-row items-center justify-between space-y-0 px-5 pb-3 pt-5"><div><CardTitle className="text-base">الاستثناءات والتنبيهات</CardTitle><p className="mt-1 text-xs text-[#89948b]">ما يستحق الانتباه قبل نهاية اليوم</p></div><button onClick={() => setShowAllAlerts(!showAllAlerts)} className="text-xs font-semibold text-[#4d8068]">{showAllAlerts ? "إخفاء" : "عرض الكل"}</button></CardHeader><CardContent className="space-y-3 px-5 pb-5">{(showAllAlerts ? [...alerts, { icon: AlertTriangle, title: "تأخر إغلاق إجراء تصحيحي", detail: "فرع الروضة · أولوية متوسطة", tone: "orange" }] : alerts).map((alert) => { const Icon = alert.icon; return <div key={alert.title} className="flex gap-3 rounded-xl border border-[#edf1ed] p-3 transition-colors hover:bg-[#fbfdfb]"><div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${alert.tone === "rose" ? "bg-[#fff0ed] text-[#cb6a5c]" : alert.tone === "amber" || alert.tone === "orange" ? "bg-[#fff3df] text-[#c47a2b]" : "bg-[#eaf3fb] text-[#5683aa]"}`}><Icon className="h-4 w-4" /></div><div className="min-w-0"><p className="text-[12px] font-semibold leading-5">{alert.title}</p><p className="mt-0.5 text-[11px] text-[#8d9990]">{alert.detail}</p></div><ChevronLeft className="mr-auto mt-2 h-3.5 w-3.5 shrink-0 text-[#aab3ac]" /></div> })}<Button variant="outline" className="mt-1 h-9 w-full rounded-xl border-[#dfe8df] text-xs text-[#63746a]" onClick={() => setActiveNav("الإجراءات والتحسين")}><ShieldCheck className="ml-2 h-4 w-4" /> فتح مركز الإجراءات</Button></CardContent></Card>
+          </section>
+
+          <section className="grid gap-5 xl:grid-cols-[1.1fr_0.9fr]">
+            <Card className="border-[#e2e9e2] bg-white shadow-[0_5px_18px_rgba(39,70,48,0.04)]"><CardHeader className="flex flex-row items-center justify-between space-y-0 px-5 pb-2"><div><CardTitle className="text-base">اتجاه المؤشر التشغيلي</CardTitle><p className="mt-1 text-xs text-[#89948b]">متوسط الشبكة خلال آخر 6 أشهر</p></div><div className="flex items-center gap-1 rounded-lg bg-[#edf7ef] px-2 py-1 text-[10px] font-semibold text-[#43815d]"><ArrowUpLeft className="h-3 w-3" /> +6.8%</div></CardHeader><CardContent className="px-5 pb-5"><div className="flex h-44 items-end gap-3 border-b border-r border-[#edf1ed] px-3 pb-0 pt-6">{[{m:"مارس",v:64},{m:"أبريل",v:72},{m:"مايو",v:68},{m:"يونيو",v:79},{m:"يوليو",v:83},{m:"أغسطس",v:89}].map((item, i) => <div key={item.m} className="flex flex-1 flex-col items-center gap-2"><span className="text-[10px] font-bold text-[#5b7865]">{item.v}%</span><div className="relative w-full max-w-10 rounded-t-md bg-[#dceee1]" style={{height: `${item.v * 1.28}px`}}><div className={`absolute inset-x-0 bottom-0 rounded-t-md ${i === 5 ? "bg-[#2d7d58]" : "bg-[#84bd98]"}`} style={{height: `${item.v * 0.85}px`}} /></div><span className="text-[10px] text-[#9aa59c]">{item.m}</span></div>)}</div></CardContent></Card>
+            <Card className="border-[#e2e9e2] bg-[#174c3d] text-white shadow-[0_5px_18px_rgba(39,70,48,0.12)]"><CardContent className="p-6"><div className="flex items-start justify-between"><div><p className="text-xs text-white/60">مركز المهام الشخصية</p><h3 className="mt-2 text-xl font-bold">لديك 7 مهام اليوم</h3></div><div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/10"><CheckCircle2 className="h-5 w-5 text-[#a8e0b7]" /></div></div><div className="mt-6 space-y-3"><div className="flex items-center gap-3 rounded-xl bg-white/10 p-3"><div className="h-2 w-2 rounded-full bg-[#f7c47a]" /><div className="flex-1"><p className="text-xs font-semibold">مراجعة محضر زيارة فرع الملقا</p><p className="mt-1 text-[10px] text-white/50">مستحق اليوم · أولوية عالية</p></div><ChevronLeft className="h-4 w-4 text-white/40" /></div><div className="flex items-center gap-3 rounded-xl bg-white/10 p-3"><div className="h-2 w-2 rounded-full bg-[#a8e0b7]" /><div className="flex-1"><p className="text-xs font-semibold">اعتماد خطة تحسين التحلية</p><p className="mt-1 text-[10px] text-white/50">مستحق غدًا · أولوية متوسطة</p></div><ChevronLeft className="h-4 w-4 text-white/40" /></div></div><Button variant="outline" className="mt-5 h-9 w-full rounded-xl border-white/20 bg-transparent text-xs text-white hover:bg-white/10" onClick={() => setActiveNav("الإجراءات والتحسين")}>فتح مركز المهام <ArrowDownLeft className="mr-2 h-3.5 w-3.5" /></Button></CardContent></Card>
+          </section>
+
+          {selectedBranch && <div className="fixed inset-0 z-50 flex items-end justify-center bg-[#173126]/20 p-4 backdrop-blur-sm md:items-center" onClick={() => setSelectedBranch(null)}><div className="w-full max-w-xl rounded-3xl border border-[#dfe8df] bg-white p-6 shadow-2xl" onClick={(event) => event.stopPropagation()}><div className="flex items-start justify-between"><div><p className="text-xs font-semibold text-[#5d8a6d]">مصدر المؤشر · ملف الفرع</p><h3 className="mt-1 text-xl font-bold">{selectedBranch.name}</h3><p className="mt-1 text-xs text-[#89948b]">{selectedBranch.area}</p></div><button onClick={() => setSelectedBranch(null)} className="rounded-xl p-2 text-[#8e9a91] hover:bg-[#f1f5f1]"><X className="h-4 w-4" /></button></div><div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4"><div className="rounded-2xl bg-[#eef8f0] p-3"><p className="text-[10px] text-[#769080]">الصحة التشغيلية</p><p className="mt-1 text-xl font-bold text-[#2c8058]">{selectedBranch.score}%</p></div><div className="rounded-2xl bg-[#fff4e3] p-3"><p className="text-[10px] text-[#927858]">الحالة</p><p className="mt-1 text-sm font-bold text-[#a96827]">{selectedBranch.status}</p></div><div className="rounded-2xl bg-[#f3f5f3] p-3"><p className="text-[10px] text-[#7d8b80]">المخاطر</p><p className="mt-1 text-sm font-bold">{selectedBranch.risk}</p></div><div className="rounded-2xl bg-[#edf3fb] p-3"><p className="text-[10px] text-[#71869b]">إجراءات مفتوحة</p><p className="mt-1 text-xl font-bold text-[#4a759e]">{selectedBranch.tasks}</p></div></div><Separator className="my-5" /><div className="flex flex-wrap gap-2"><Button className="rounded-xl bg-[#174c3d] text-xs" onClick={() => setActiveNav("الفروع")}>فتح ملف الفرع الكامل <ArrowDownLeft className="mr-2 h-3.5 w-3.5" /></Button><Button variant="outline" className="rounded-xl text-xs" onClick={() => setActiveNav("الإجراءات والتحسين")}><ShieldCheck className="ml-2 h-3.5 w-3.5" /> عرض الإجراءات</Button><Button variant="outline" className="rounded-xl text-xs" onClick={() => setActiveNav("الزيارات والفحص")}><ClipboardCheck className="ml-2 h-3.5 w-3.5" /> سجل الزيارات</Button></div></div></div>}
+
+          <footer className="flex flex-col items-center justify-between gap-2 border-t border-[#e3e9e3] pt-4 text-[11px] text-[#9aa49c] sm:flex-row"><span>مرصد الفروع · منصة المتابعة والتحسين التشغيلي</span><span className="flex items-center gap-2"><Clock3 className="h-3.5 w-3.5" /> آخر تحديث: اليوم، 10:42 ص</span></footer>
+        </div>
       </main>
     </div>
   );
