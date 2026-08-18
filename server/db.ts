@@ -102,7 +102,7 @@ export async function getOperationsOverview(user: Pick<User, "role" | "regionId"
   const [visitsRows, actionRows, documentRows, qualityRows, maintenanceRows, requestRows, taskRows] = await Promise.all([
     filterRows(visits), filterRows(correctiveActions), filterRows(documents), filterRows(qualityCases), filterRows(maintenanceTickets), filterRows(internalRequests), filterRows(tasks),
   ]);
-  return { comparison, visits: visitsRows, actions: actionRows, documents: documentRows, qualityCases: qualityRows, maintenanceTickets: maintenanceRows, requests: requestRows, tasks: taskRows };
+  return { comparison, visits: visitsRows, actions: actionRows, documents: documentRows, qualityCases: qualityRows, maintenanceTickets: maintenanceRows, requests: requestRows, tasks: taskRows, tasksAndRequests: [...taskRows, ...requestRows] };
 }
 
 export async function getDashboardSummary(user: Pick<User, "id" | "role" | "regionId" | "branchId">) {

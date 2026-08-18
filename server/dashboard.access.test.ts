@@ -100,3 +100,21 @@ describe("branch profile access", () => {
     await expect(caller.branches.profile({ id: 0 })).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 });
+
+describe("operational status transitions", () => {
+  const anonymousContext: TrpcContext = { user: null, req: {} as TrpcContext["req"], res: {} as TrpcContext["res"] };
+
+  it("rejects unauthenticated status transitions", async () => {
+    const caller = appRouter.createCaller(anonymousContext);
+    await expect(caller.actions.updateStatus({ id: 1, status: "closed" })).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+    await expect(caller.visits.updateStatus({ id: 1, status: "completed" })).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+    await expect(caller.maintenance.updateStatus({ id: 1, status: "closed" })).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+    await expect(caller.tasks.updateStatus({ id: 1, status: "done" })).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  });
+
+  it("rejects an unauthorized role from maintenance status changes", async () => {
+    const user = { id: 11, openId: "warehouse-user", name: "المستودع", email: "warehouse@example.com", loginMethod: "manus", role: "warehouse" as const, createdAt: new Date(), updatedAt: new Date(), lastSignedIn: new Date() };
+    const ctx: TrpcContext = { user, req: {} as TrpcContext["req"], res: {} as TrpcContext["res"] };
+    await expect(appRouter.createCaller(ctx).maintenance.updateStatus({ id: 1, status: "closed" })).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+});
