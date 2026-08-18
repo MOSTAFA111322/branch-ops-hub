@@ -213,6 +213,7 @@ export default function Home() {
   const [activeNav, setActiveNav] = useState("نظرة عامة");
   const [query, setQuery] = useState("");
   const [showQuickAction, setShowQuickAction] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
   const [showAllAlerts, setShowAllAlerts] = useState(false);
   const [selectedBranch, setSelectedBranch] = useState<((typeof branches)[number] & { id?: number }) | null>(null);
   const { user } = useAuth();
@@ -299,7 +300,7 @@ export default function Home() {
             </div>
             <div className="flex items-center gap-2">
               <div className="relative hidden md:block"><Search className="absolute right-3 top-2.5 h-4 w-4 text-[#98a39a]" /><Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="ابحث عن فرع أو منطقة..." className="h-9 w-56 rounded-xl border-[#dce5dc] bg-white pr-9 text-xs shadow-none focus-visible:ring-[#6ea787]" /></div>
-              <Button variant="outline" size="icon" className="h-9 w-9 rounded-xl border-[#dce5dc] bg-white text-[#66736a]"><Bell className="h-4 w-4" /><span className="absolute mr-5 mt-[-15px] h-2 w-2 rounded-full bg-[#e48552]" /></Button>
+              <div className="relative"><Button variant="outline" size="icon" aria-label="فتح التنبيهات" className="h-9 w-9 rounded-xl border-[#dce5dc] bg-white text-[#66736a]" onClick={() => setShowNotifications((value) => !value)}><Bell className="h-4 w-4" />{dashboardAlerts.length > 0 && <span className="absolute mr-5 mt-[-15px] h-2 w-2 rounded-full bg-[#e48552]" />}</Button>{showNotifications && <div className="absolute left-0 top-11 z-40 w-80 rounded-2xl border border-[#dfe8df] bg-white p-3 text-right shadow-xl"><div className="mb-2 flex items-center justify-between"><p className="text-xs font-bold">التنبيهات الداخلية</p><span className="rounded-full bg-[#fff3df] px-2 py-1 text-[10px] text-[#a65d1b]">{dashboardAlerts.length} نشط</span></div>{dashboardAlerts.length ? <div className="space-y-2">{dashboardAlerts.slice(0, 5).map((alert) => <button key={alert.id} className="flex w-full items-start gap-2 rounded-xl p-2 text-right hover:bg-[#f7faf7]" onClick={() => { setShowNotifications(false); setActiveNav(alert.kind === "maintenance" ? "الصيانة والأصول" : alert.kind === "document" ? "الوثائق والتراخيص" : alert.kind === "visit" ? "الزيارات والفحص" : "الإجراءات والتحسين"); }}>{(() => { const AlertIcon = alert.icon; return <AlertIcon className="mt-0.5 h-4 w-4 shrink-0 text-[#4d8068]" />; })()}<span><span className="block text-[11px] font-semibold">{alert.title}</span><span className="mt-0.5 block text-[10px] text-[#89948b]">{alert.detail}</span></span></button>)}</div> : <p className="py-5 text-center text-xs text-[#89948b]">لا توجد تنبيهات نشطة ضمن نطاقك.</p>}</div>}</div>
               <div className="hidden h-9 items-center gap-2 rounded-xl border border-[#dce5dc] bg-white px-2.5 sm:flex"><div className="flex h-6 w-6 items-center justify-center rounded-lg bg-[#dcefe3] text-[10px] font-bold text-[#1f7555]">م</div><span className="text-xs font-semibold">مدير التشغيل</span><ChevronLeft className="h-3 w-3 rotate-[-90deg] text-[#9aa49c]" /></div>
             </div>
           </div>
