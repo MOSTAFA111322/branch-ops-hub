@@ -6,7 +6,19 @@ import { protectedProcedure, publicProcedure, roleProcedure, router } from "./_c
 import { eq, inArray } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { getBranchById, getBranchProfile, getDashboardSummary, getOperationsOverview, listBranches, getDb } from "./db";
-import { branches, branchAssets, checklistItems, checklistTemplates, correctiveActions, documentVersions, documents, internalRequests, maintenanceTickets, qualityCases, tasks, users, visitChecklistResults, visits } from "../drizzle/schema";
+import { branches, branchAssets, branchFinancialSnapshots, checklistItems, checklistTemplates, correctiveActions, documentVersions, documents, internalRequests, maintenanceTickets, qualityCases, tasks, users, visitChecklistResults, visits, auditLogs } from "../drizzle/schema";
+
+async function recordAudit(db: any, input: { actorId?: number; branchId?: number; entityType: string; entityId?: number; action: string; beforeData?: unknown; afterData?: unknown }) {
+  await db.insert(auditLogs).values({
+    actorId: input.actorId,
+    branchId: input.branchId,
+    entityType: input.entityType,
+    entityId: input.entityId,
+    action: input.action,
+    beforeData: input.beforeData === undefined ? undefined : JSON.stringify(input.beforeData),
+    afterData: input.afterData === undefined ? undefined : JSON.stringify(input.afterData),
+  });
+}
 
 export const appRouter = router({
   system: systemRouter,
@@ -42,19 +54,22 @@ export const appRouter = router({
       const inserted = await db.insert(checklistTemplates).values({ name: input.name, category: input.category, createdBy: ctx.user.id });
       const templateId = Number(inserted[0].insertId);
       await db.insert(checklistItems).values(input.items.map((item, index) => ({ templateId, label: item.label, orderIndex: index, isRequired: item.isRequired })));
+      await recordAudit(db, { actorId: ctx.user.id, entityType: "checklist_template", entityId: templateId, action: "create", afterData: input });
       return { id: templateId };
     }),
-    update: roleProcedure(["admin", "area_manager", "quality"]).input(z.object({ id: z.number().int().positive(), name: z.string().min(2).max(180).optional(), category: z.string().min(2).max(100).optional(), isActive: z.boolean().optional() })).mutation(async ({ input }) => { const db = await getDb(); if (!db) throw new Error("Database unavailable"); const [current] = await db.select({ id: checklistTemplates.id }).from(checklistTemplates).where(eq(checklistTemplates.id, input.id)).limit(1); if (!current) throw new TRPCError({ code: "NOT_FOUND", message: "قالب الفحص غير موجود" }); await db.update(checklistTemplates).set({ name: input.name, category: input.category, isActive: input.isActive }).where(eq(checklistTemplates.id, input.id)); return { success: true }; }),
-    updateItem: roleProcedure(["admin", "area_manager", "quality"]).input(z.object({ id: z.number().int().positive(), label: z.string().min(2).max(240).optional(), isRequired: z.boolean().optional(), orderIndex: z.number().int().min(0).optional() })).mutation(async ({ input }) => { const db = await getDb(); if (!db) throw new Error("Database unavailable"); const [current] = await db.select({ id: checklistItems.id }).from(checklistItems).where(eq(checklistItems.id, input.id)).limit(1); if (!current) throw new TRPCError({ code: "NOT_FOUND", message: "عنصر الفحص غير موجود" }); await db.update(checklistItems).set({ label: input.label, isRequired: input.isRequired, orderIndex: input.orderIndex }).where(eq(checklistItems.id, input.id)); return { success: true }; }),
-    reorder: roleProcedure(["admin", "area_manager", "quality"]).input(z.object({ templateId: z.number().int().positive(), itemIds: z.array(z.number().int().positive()).min(1).max(100) })).mutation(async ({ input }) => { const db = await getDb(); if (!db) throw new Error("Database unavailable"); await Promise.all(input.itemIds.map((id, index) => db.update(checklistItems).set({ orderIndex: index }).where(eq(checklistItems.id, id)))); return { success: true }; }),
+    update: roleProcedure(["admin", "area_manager", "quality"]).input(z.object({ id: z.number().int().positive(), name: z.string().min(2).max(180).optional(), category: z.string().min(2).max(100).optional(), isActive: z.boolean().optional() })).mutation(async ({ input, ctx }) => { const db = await getDb(); if (!db) throw new Error("Database unavailable"); const [current] = await db.select().from(checklistTemplates).where(eq(checklistTemplates.id, input.id)).limit(1); if (!current) throw new TRPCError({ code: "NOT_FOUND", message: "قالب الفحص غير موجود" }); await db.update(checklistTemplates).set({ name: input.name, category: input.category, isActive: input.isActive }).where(eq(checklistTemplates.id, input.id)); await recordAudit(db, { actorId: ctx.user.id, entityType: "checklist_template", entityId: input.id, action: "update", beforeData: current, afterData: input }); return { success: true }; }),
+    updateItem: roleProcedure(["admin", "area_manager", "quality"]).input(z.object({ id: z.number().int().positive(), label: z.string().min(2).max(240).optional(), isRequired: z.boolean().optional(), orderIndex: z.number().int().min(0).optional() })).mutation(async ({ input, ctx }) => { const db = await getDb(); if (!db) throw new Error("Database unavailable"); const [current] = await db.select().from(checklistItems).where(eq(checklistItems.id, input.id)).limit(1); if (!current) throw new TRPCError({ code: "NOT_FOUND", message: "عنصر الفحص غير موجود" }); await db.update(checklistItems).set({ label: input.label, isRequired: input.isRequired, orderIndex: input.orderIndex }).where(eq(checklistItems.id, input.id)); await recordAudit(db, { actorId: ctx.user.id, entityType: "checklist_item", entityId: input.id, action: "update", beforeData: current, afterData: input }); return { success: true }; }),
+    reorder: roleProcedure(["admin", "area_manager", "quality"]).input(z.object({ templateId: z.number().int().positive(), itemIds: z.array(z.number().int().positive()).min(1).max(100) })).mutation(async ({ input, ctx }) => { const db = await getDb(); if (!db) throw new Error("Database unavailable"); await Promise.all(input.itemIds.map((id, index) => db.update(checklistItems).set({ orderIndex: index }).where(eq(checklistItems.id, id)))); await recordAudit(db, { actorId: ctx.user.id, entityType: "checklist_template", entityId: input.templateId, action: "reorder_items", afterData: input.itemIds }); return { success: true }; }),
     report: roleProcedure(["admin", "area_manager", "branch_manager", "quality"]).input(z.object({ period: z.enum(["day", "week", "month"]).default("month") })).query(async ({ input, ctx }) => { const db = await getDb(); if (!db) throw new Error("Database unavailable"); const visibleBranches = await listBranches(ctx.user); const branchIds = visibleBranches.map(branch => branch.id); const since = new Date(Date.now() - (input.period === "day" ? 86400000 : input.period === "week" ? 604800000 : 2592000000)); const visitRows = await db.select().from(visits).where(inArray(visits.branchId, branchIds)); const resultRows = await db.select().from(visitChecklistResults); const templates = await db.select().from(checklistTemplates); const items = await db.select().from(checklistItems); const visibleVisits = visitRows.filter(visit => (!visit.createdAt || visit.createdAt >= since) && visit.checklistTemplateId); const rows = visibleBranches.map(branch => { const branchVisits = visibleVisits.filter(visit => visit.branchId === branch.id); const visitIds = new Set(branchVisits.map(visit => visit.id)); const results = resultRows.filter(result => visitIds.has(result.visitId)); const itemMap = new Map(items.filter(item => branchVisits.some(visit => visit.checklistTemplateId === item.templateId)).map(item => [item.id, item])); const required = results.filter(result => itemMap.get(result.itemId)?.isRequired && result.result !== "na"); const passed = required.filter(result => result.result === "pass"); const failed = required.filter(result => result.result === "fail"); return { branchId: branch.id, branchName: branch.name, visits: branchVisits.length, checked: required.length, passed: passed.length, failed: failed.length, compliance: required.length ? Math.round((passed.length / required.length) * 100) : 0 }; }); return { period: input.period, rows, templates: templates.filter(template => template.isActive).length }; }),
     alerts: roleProcedure(["admin", "area_manager", "branch_manager", "quality"]).query(async ({ ctx }) => { const db = await getDb(); if (!db) throw new Error("Database unavailable"); const visibleBranches = await listBranches(ctx.user); const branchIds = visibleBranches.map(branch => branch.id); const branchNames = new Map(visibleBranches.map(branch => [branch.id, branch.name])); const visitRows = await db.select().from(visits).where(inArray(visits.branchId, branchIds)); const resultRows = await db.select().from(visitChecklistResults); const items = await db.select().from(checklistItems); const now = Date.now(); const alerts: Array<{ id: string; kind: "checklist" | "visit"; branchId: number; title: string; detail: string; tone: "amber" | "rose" }> = []; for (const visit of visitRows) { if (visit.scheduledAt && visit.status === "scheduled" && new Date(visit.scheduledAt).getTime() < now) alerts.push({ id: `visit-${visit.id}`, kind: "visit", branchId: visit.branchId, title: "زيارة متأخرة", detail: `${branchNames.get(visit.branchId) ?? "الفرع"} · الزيارة المجدولة تحتاج متابعة`, tone: "amber" }); const requiredFailures = resultRows.filter(result => result.visitId === visit.id && result.result === "fail" && items.some(item => item.id === result.itemId && item.isRequired)); if (requiredFailures.length) alerts.push({ id: `checklist-${visit.id}`, kind: "checklist", branchId: visit.branchId, title: "فشل عنصر إلزامي", detail: `${branchNames.get(visit.branchId) ?? "الفرع"} · ${requiredFailures.length} عناصر تحتاج إجراء تصحيحي`, tone: "rose" }); } return alerts.slice(0, 30); }),
     results: roleProcedure(["admin", "area_manager", "branch_manager", "quality"]).input(z.object({ visitIds: z.array(z.number().int().positive()).min(1).max(100) })).query(async ({ input, ctx }) => { const db = await getDb(); if (!db) throw new Error("Database unavailable"); const requestedVisits = await db.select({ id: visits.id, branchId: visits.branchId }).from(visits).where(inArray(visits.id, input.visitIds)); const allowedBranchIds = ctx.user.role === "admin" ? null : (await listBranches(ctx.user)).map(branch => branch.id); const allowedVisitIds = requestedVisits.filter(visit => allowedBranchIds === null || allowedBranchIds.includes(visit.branchId)).map(visit => visit.id); if (!allowedVisitIds.length) return []; return db.select().from(visitChecklistResults).where(inArray(visitChecklistResults.visitId, allowedVisitIds)); },),
-    record: roleProcedure(["admin", "area_manager", "branch_manager", "quality"]).input(z.object({ visitId: z.number().int().positive(), results: z.array(z.object({ itemId: z.number().int().positive(), result: z.enum(["pass", "fail", "na"]), note: z.string().optional() })).min(1).max(100) })).mutation(async ({ input }) => {
+    record: roleProcedure(["admin", "area_manager", "branch_manager", "quality"]).input(z.object({ visitId: z.number().int().positive(), results: z.array(z.object({ itemId: z.number().int().positive(), result: z.enum(["pass", "fail", "na"]), note: z.string().optional() })).min(1).max(100) })).mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new Error("Database unavailable");
       await db.delete(visitChecklistResults).where(eq(visitChecklistResults.visitId, input.visitId));
       await db.insert(visitChecklistResults).values(input.results.map(result => ({ visitId: input.visitId, ...result })));
+      const [visit] = await db.select({ branchId: visits.branchId }).from(visits).where(eq(visits.id, input.visitId)).limit(1);
+      await recordAudit(db, { actorId: ctx.user.id, branchId: visit?.branchId, entityType: "visit_checklist", entityId: input.visitId, action: "record", afterData: input.results });
       return { success: true };
     }),
   }),
@@ -75,6 +90,47 @@ export const appRouter = router({
       if (!db) throw new Error("Database unavailable");
       const result = await db.insert(branches).values(input);
       return { id: result[0].insertId, ...input };
+    }),
+  }),
+  financials: router({
+    list: protectedProcedure.input(z.object({ branchId: z.number().int().positive().optional(), year: z.number().int().min(2000).max(2200).optional(), month: z.number().int().min(1).max(12).optional() }).optional()).query(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      const allowedBranches = await listBranches(ctx.user);
+      const allowedIds = allowedBranches.map(branch => branch.id);
+      if (!allowedIds.length) return [];
+      const rows = await db.select().from(branchFinancialSnapshots).where(inArray(branchFinancialSnapshots.branchId, input?.branchId ? [input.branchId].filter(id => allowedIds.includes(id)) : allowedIds));
+      return rows.filter(row => (input?.year === undefined || row.periodYear === input.year) && (input?.month === undefined || row.periodMonth === input.month));
+    }),
+    upsert: roleProcedure(["admin", "area_manager", "branch_manager"]).input(z.object({ branchId: z.number().int().positive(), year: z.number().int().min(2000).max(2200), month: z.number().int().min(1).max(12), revenue: z.number().min(0), costOfGoods: z.number().min(0), operatingExpenses: z.number().min(0), notes: z.string().max(2000).optional() })).mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      const allowedIds = (await listBranches(ctx.user)).map(branch => branch.id);
+      if (!allowedIds.includes(input.branchId)) throw new TRPCError({ code: "FORBIDDEN", message: "لا تملك صلاحية هذا الفرع" });
+      const existing = await db.select().from(branchFinancialSnapshots).where(eq(branchFinancialSnapshots.branchId, input.branchId));
+      const match = existing.find(row => row.periodYear === input.year && row.periodMonth === input.month);
+      const values = { branchId: input.branchId, periodYear: input.year, periodMonth: input.month, revenue: input.revenue.toFixed(2), costOfGoods: input.costOfGoods.toFixed(2), operatingExpenses: input.operatingExpenses.toFixed(2), netProfit: (input.revenue - input.costOfGoods - input.operatingExpenses).toFixed(2), notes: input.notes, source: "manual" as const, createdBy: ctx.user.id };
+      if (match) {
+        await db.update(branchFinancialSnapshots).set({ ...values, createdBy: match.createdBy ?? ctx.user.id }).where(eq(branchFinancialSnapshots.id, match.id));
+        await recordAudit(db, { actorId: ctx.user.id, branchId: input.branchId, entityType: "financial_snapshot", entityId: match.id, action: "update", beforeData: match, afterData: values });
+        return { id: match.id, updated: true };
+      }
+      const inserted = await db.insert(branchFinancialSnapshots).values(values);
+      const id = Number(inserted[0].insertId);
+      await recordAudit(db, { actorId: ctx.user.id, branchId: input.branchId, entityType: "financial_snapshot", entityId: id, action: "create", afterData: values });
+      return { id, updated: false };
+    }),
+    remove: roleProcedure(["admin", "area_manager", "branch_manager"]).input(z.object({ id: z.number().int().positive() })).mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      const rows = await db.select().from(branchFinancialSnapshots).where(eq(branchFinancialSnapshots.id, input.id));
+      const row = rows[0];
+      if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "اللقطة المالية غير موجودة" });
+      const allowedIds = (await listBranches(ctx.user)).map(branch => branch.id);
+      if (!allowedIds.includes(row.branchId)) throw new TRPCError({ code: "FORBIDDEN", message: "لا تملك صلاحية هذا الفرع" });
+      await db.delete(branchFinancialSnapshots).where(eq(branchFinancialSnapshots.id, input.id));
+      await recordAudit(db, { actorId: ctx.user.id, branchId: row.branchId, entityType: "financial_snapshot", entityId: row.id, action: "delete", beforeData: row });
+      return { success: true };
     }),
   }),
   actions: router({

@@ -1,4 +1,4 @@
-import { int, mysqlEnum, mysqlTable, text, timestamp, varchar, decimal, boolean } from "drizzle-orm/mysql-core";
+import { int, mysqlEnum, mysqlTable, text, timestamp, varchar, decimal, boolean, uniqueIndex } from "drizzle-orm/mysql-core";
 
 export const users = mysqlTable("users", {
   id: int("id").autoincrement().primaryKey(),
@@ -39,6 +39,24 @@ export const branches = mysqlTable("branches", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
+
+export const branchFinancialSnapshots = mysqlTable("branchFinancialSnapshots", {
+  id: int("id").autoincrement().primaryKey(),
+  branchId: int("branchId").notNull(),
+  periodYear: int("periodYear").notNull(),
+  periodMonth: int("periodMonth").notNull(),
+  revenue: decimal("revenue", { precision: 14, scale: 2 }).default("0").notNull(),
+  costOfGoods: decimal("costOfGoods", { precision: 14, scale: 2 }).default("0").notNull(),
+  operatingExpenses: decimal("operatingExpenses", { precision: 14, scale: 2 }).default("0").notNull(),
+  netProfit: decimal("netProfit", { precision: 14, scale: 2 }).default("0").notNull(),
+  notes: text("notes"),
+  source: mysqlEnum("source", ["manual", "excel_import"]).default("manual").notNull(),
+  createdBy: int("createdBy"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => ({
+  branchPeriodUnique: uniqueIndex("branch_financial_branch_period_unique").on(table.branchId, table.periodYear, table.periodMonth),
+}));
 
 export const branchEmployees = mysqlTable("branchEmployees", {
   id: int("id").autoincrement().primaryKey(),
@@ -213,6 +231,18 @@ export const internalRequests = mysqlTable("internalRequests", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
+export const auditLogs = mysqlTable("auditLogs", {
+  id: int("id").autoincrement().primaryKey(),
+  actorId: int("actorId"),
+  branchId: int("branchId"),
+  entityType: varchar("entityType", { length: 80 }).notNull(),
+  entityId: int("entityId"),
+  action: varchar("action", { length: 80 }).notNull(),
+  beforeData: text("beforeData"),
+  afterData: text("afterData"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
 export const tasks = mysqlTable("tasks", {
   id: int("id").autoincrement().primaryKey(),
   branchId: int("branchId"),
@@ -229,4 +259,5 @@ export type InsertUser = typeof users.$inferInsert;
 export type Region = typeof regions.$inferSelect;
 export type Branch = typeof branches.$inferSelect;
 export type Visit = typeof visits.$inferSelect;
+export type BranchFinancialSnapshot = typeof branchFinancialSnapshots.$inferSelect;
 export type CorrectiveAction = typeof correctiveActions.$inferSelect;
