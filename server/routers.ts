@@ -113,6 +113,7 @@ export const appRouter = router({
       const result = await db.insert(internalRequests).values({ ...input, requesterId: ctx.user.id });
       return { id: result[0].insertId };
     }),
+    update: protectedProcedure.input(z.object({ id: z.number().int().positive(), title: z.string().min(1).max(220).optional(), priority: z.enum(["low", "medium", "high", "urgent"]).optional(), description: z.string().optional() })).mutation(async ({ input, ctx }) => { const db = await getDb(); if (!db) throw new Error("Database unavailable"); const [request] = await db.select().from(internalRequests).where(eq(internalRequests.id, input.id)).limit(1); if (!request) throw new TRPCError({ code: "NOT_FOUND", message: "الطلب غير موجود" }); if (ctx.user.role !== "admin" && request.requesterId !== ctx.user.id) throw new TRPCError({ code: "FORBIDDEN", message: "لا تملك صلاحية تحرير هذا الطلب" }); await db.update(internalRequests).set({ title: input.title ?? request.title, priority: input.priority ?? request.priority, description: input.description ?? request.description }).where(eq(internalRequests.id, input.id)); return { success: true }; }),
   }),
   tasks: router({
     remove: protectedProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ input, ctx }) => { const db = await getDb(); if (!db) throw new Error("Database unavailable"); const [task] = await db.select().from(tasks).where(eq(tasks.id, input.id)).limit(1); if (!task) throw new TRPCError({ code: "NOT_FOUND" }); if (ctx.user.role !== "admin" && task.assigneeId !== ctx.user.id) throw new TRPCError({ code: "FORBIDDEN" }); await db.delete(tasks).where(eq(tasks.id, input.id)); return { success: true }; }),
@@ -128,6 +129,7 @@ export const appRouter = router({
       const result = await db.insert(tasks).values({ ...input, assigneeId: ctx.user.id });
       return { id: result[0].insertId };
     }),
+    update: protectedProcedure.input(z.object({ id: z.number().int().positive(), title: z.string().min(1).max(220).optional(), priority: z.enum(["low", "medium", "high", "urgent"]).optional(), dueAt: z.date().optional() })).mutation(async ({ input, ctx }) => { const db = await getDb(); if (!db) throw new Error("Database unavailable"); const [task] = await db.select().from(tasks).where(eq(tasks.id, input.id)).limit(1); if (!task) throw new TRPCError({ code: "NOT_FOUND", message: "المهمة غير موجودة" }); if (ctx.user.role !== "admin" && task.assigneeId !== ctx.user.id) throw new TRPCError({ code: "FORBIDDEN", message: "لا تملك صلاحية تحرير هذه المهمة" }); await db.update(tasks).set({ title: input.title ?? task.title, priority: input.priority ?? task.priority, dueAt: input.dueAt ?? task.dueAt }).where(eq(tasks.id, input.id)); return { success: true }; }),
   }),
   ops: router({
     overview: protectedProcedure.input(z.object({ period: z.enum(["day", "week", "month"]).default("month") }).optional()).query(({ ctx, input }) => getOperationsOverview(ctx.user, input?.period ?? "month")),
