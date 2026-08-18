@@ -3,10 +3,10 @@ import { COOKIE_NAME } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, roleProcedure, router } from "./_core/trpc";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { getBranchById, getBranchProfile, getDashboardSummary, getOperationsOverview, listBranches, getDb } from "./db";
-import { branches, branchAssets, correctiveActions, documentVersions, documents, internalRequests, maintenanceTickets, qualityCases, tasks, users, visits } from "../drizzle/schema";
+import { branches, branchAssets, checklistItems, checklistTemplates, correctiveActions, documentVersions, documents, internalRequests, maintenanceTickets, qualityCases, tasks, users, visitChecklistResults, visits } from "../drizzle/schema";
 
 export const appRouter = router({
   system: systemRouter,
@@ -26,6 +26,31 @@ export const appRouter = router({
       const db = await getDb();
       if (!db) throw new Error("Database unavailable");
       return db.select({ id: users.id, name: users.name, role: users.role }).from(users).limit(200);
+    }),
+  }),
+  checklists: router({
+    list: roleProcedure(["admin", "area_manager", "branch_manager", "quality"]).query(async () => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      const templates = await db.select().from(checklistTemplates).limit(100);
+      const items = await db.select().from(checklistItems).limit(500);
+      return templates.map(template => ({ ...template, items: items.filter(item => item.templateId === template.id).sort((a, b) => a.orderIndex - b.orderIndex) }));
+    }),
+    create: roleProcedure(["admin", "area_manager", "quality"]).input(z.object({ name: z.string().min(2).max(180), category: z.string().min(2).max(100).default("تشغيلي"), items: z.array(z.object({ label: z.string().min(2).max(240), isRequired: z.boolean().default(true) })).min(1).max(50) })).mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      const inserted = await db.insert(checklistTemplates).values({ name: input.name, category: input.category, createdBy: ctx.user.id });
+      const templateId = Number(inserted[0].insertId);
+      await db.insert(checklistItems).values(input.items.map((item, index) => ({ templateId, label: item.label, orderIndex: index, isRequired: item.isRequired })));
+      return { id: templateId };
+    }),
+    results: roleProcedure(["admin", "area_manager", "branch_manager", "quality"]).input(z.object({ visitIds: z.array(z.number().int().positive()).min(1).max(100) })).query(async ({ input, ctx }) => { const db = await getDb(); if (!db) throw new Error("Database unavailable"); const requestedVisits = await db.select({ id: visits.id, branchId: visits.branchId }).from(visits).where(inArray(visits.id, input.visitIds)); const allowedBranchIds = ctx.user.role === "admin" ? null : (await listBranches(ctx.user)).map(branch => branch.id); const allowedVisitIds = requestedVisits.filter(visit => allowedBranchIds === null || allowedBranchIds.includes(visit.branchId)).map(visit => visit.id); if (!allowedVisitIds.length) return []; return db.select().from(visitChecklistResults).where(inArray(visitChecklistResults.visitId, allowedVisitIds)); },),
+    record: roleProcedure(["admin", "area_manager", "branch_manager", "quality"]).input(z.object({ visitId: z.number().int().positive(), results: z.array(z.object({ itemId: z.number().int().positive(), result: z.enum(["pass", "fail", "na"]), note: z.string().optional() })).min(1).max(100) })).mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      await db.delete(visitChecklistResults).where(eq(visitChecklistResults.visitId, input.visitId));
+      await db.insert(visitChecklistResults).values(input.results.map(result => ({ visitId: input.visitId, ...result })));
+      return { success: true };
     }),
   }),
   branches: router({
@@ -67,8 +92,8 @@ export const appRouter = router({
   visits: router({
     remove: roleProcedure(["admin", "area_manager", "branch_manager", "quality"]).input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => { const db = await getDb(); if (!db) throw new Error("Database unavailable"); await db.delete(visits).where(eq(visits.id, input.id)); return { success: true }; }),
     updateStatus: roleProcedure(["admin", "area_manager", "branch_manager", "quality"]).input(z.object({ id: z.number().int().positive(), status: z.enum(["scheduled", "in_progress", "completed", "cancelled"]), score: z.number().min(0).max(100).optional(), notes: z.string().min(1).optional(), reportTitle: z.string().min(1).max(220).optional(), findings: z.string().optional(), recommendations: z.string().optional(), approvalStatus: z.enum(["draft", "submitted", "approved"]).optional() })).mutation(async ({ input }) => { const db = await getDb(); if (!db) throw new Error("Database unavailable"); const [visit] = await db.select().from(visits).where(eq(visits.id, input.id)).limit(1); if (!visit) throw new TRPCError({ code: "NOT_FOUND", message: "الزيارة غير موجودة" }); await db.update(visits).set({ status: input.status, score: input.score?.toString(), notes: input.notes, reportTitle: input.reportTitle, findings: input.findings, recommendations: input.recommendations, approvalStatus: input.approvalStatus, approvedAt: input.approvalStatus === "approved" ? new Date() : undefined, completedAt: input.status === "completed" ? new Date() : undefined }).where(eq(visits.id, input.id)); if (input.status === "completed" && input.score !== undefined) await db.update(branches).set({ healthScore: input.score.toString() }).where(eq(branches.id, visit.branchId)); return { success: true, branchId: visit.branchId, score: input.score ?? null, approvalStatus: input.approvalStatus ?? visit.approvalStatus }; }),
-    update: roleProcedure(["admin", "area_manager", "branch_manager", "quality"]).input(z.object({ id: z.number().int().positive(), scheduledAt: z.date().optional(), notes: z.string().optional(), reportTitle: z.string().min(1).max(220).optional(), findings: z.string().optional(), recommendations: z.string().optional() })).mutation(async ({ input }) => { const db = await getDb(); if (!db) throw new Error("Database unavailable"); const [current] = await db.select({ id: visits.id }).from(visits).where(eq(visits.id, input.id)).limit(1); if (!current) throw new TRPCError({ code: "NOT_FOUND", message: "الزيارة غير موجودة" }); await db.update(visits).set({ scheduledAt: input.scheduledAt, notes: input.notes, reportTitle: input.reportTitle, findings: input.findings, recommendations: input.recommendations }).where(eq(visits.id, input.id)); return { success: true }; }),
-    create: roleProcedure(["admin", "area_manager", "branch_manager", "quality"]).input(z.object({ branchId: z.number().int().positive(), scheduledAt: z.date().optional(), notes: z.string().optional() })).mutation(async ({ input }) => {
+    update: roleProcedure(["admin", "area_manager", "branch_manager", "quality"]).input(z.object({ id: z.number().int().positive(), scheduledAt: z.date().optional(), notes: z.string().optional(), reportTitle: z.string().min(1).max(220).optional(), findings: z.string().optional(), recommendations: z.string().optional(), checklistTemplateId: z.number().int().positive().nullable().optional() })).mutation(async ({ input }) => { const db = await getDb(); if (!db) throw new Error("Database unavailable"); const [current] = await db.select({ id: visits.id }).from(visits).where(eq(visits.id, input.id)).limit(1); if (!current) throw new TRPCError({ code: "NOT_FOUND", message: "الزيارة غير موجودة" }); await db.update(visits).set({ scheduledAt: input.scheduledAt, notes: input.notes, reportTitle: input.reportTitle, findings: input.findings, recommendations: input.recommendations, checklistTemplateId: input.checklistTemplateId }).where(eq(visits.id, input.id)); return { success: true }; }),
+    create: roleProcedure(["admin", "area_manager", "branch_manager", "quality"]).input(z.object({ branchId: z.number().int().positive(), scheduledAt: z.date().optional(), notes: z.string().optional(), checklistTemplateId: z.number().int().positive().optional() })).mutation(async ({ input }) => {
       const db = await getDb();
       if (!db) throw new Error("Database unavailable");
       const result = await db.insert(visits).values(input);

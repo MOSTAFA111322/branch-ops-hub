@@ -108,7 +108,34 @@ export const visits = mysqlTable("visits", {
   findings: text("findings"),
   recommendations: text("recommendations"),
   approvalStatus: mysqlEnum("approvalStatus", ["draft", "submitted", "approved"]).default("draft").notNull(),
+  checklistTemplateId: int("checklistTemplateId"),
   approvedAt: timestamp("approvedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export const checklistTemplates = mysqlTable("checklistTemplates", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 180 }).notNull(),
+  category: varchar("category", { length: 100 }).default("تشغيلي").notNull(),
+  isActive: boolean("isActive").default(true).notNull(),
+  createdBy: int("createdBy"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export const checklistItems = mysqlTable("checklistItems", {
+  id: int("id").autoincrement().primaryKey(),
+  templateId: int("templateId").notNull(),
+  label: varchar("label", { length: 240 }).notNull(),
+  orderIndex: int("orderIndex").default(0).notNull(),
+  isRequired: boolean("isRequired").default(true).notNull(),
+});
+
+export const visitChecklistResults = mysqlTable("visitChecklistResults", {
+  id: int("id").autoincrement().primaryKey(),
+  visitId: int("visitId").notNull(),
+  itemId: int("itemId").notNull(),
+  result: mysqlEnum("result", ["pass", "fail", "na"]).default("na").notNull(),
+  note: text("note"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
