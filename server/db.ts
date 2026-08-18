@@ -1,4 +1,4 @@
-import { desc, eq, inArray } from "drizzle-orm";
+import { desc, eq, inArray, gte } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { branches, branchAssets, branchContracts, branchEmployees, branchEvents, branchInventory, correctiveActions, documents, internalRequests, maintenanceTickets, qualityCases, tasks, users, visits, InsertUser, User } from "../drizzle/schema";
 import { ENV } from "./_core/env";
@@ -88,21 +88,25 @@ export async function getBranchProfile(id: number, user: Pick<User, "role" | "re
   return { branch, employees, contracts, assets, inventory, documents: documentsRows, actions, qualityCases: qualityRows, maintenanceTickets: maintenanceRows, events, visits: visitsRows, requests, tasks: tasksRows };
 }
 
-export async function getOperationsOverview(user: Pick<User, "role" | "regionId" | "branchId">) {
+export async function getOperationsOverview(user: Pick<User, "id" | "role" | "regionId" | "branchId">, period: "day" | "week" | "month" = "month") {
   const db = await getDb();
   if (!db) return { visits: [], actions: [], documents: [], qualityCases: [], maintenanceTickets: [], requests: [], tasks: [] };
   const visible = await listBranches(user);
   const ids = visible.map((branch) => branch.id);
   if (user.role !== "admin" && !ids.length) return { visits: [], actions: [], documents: [], qualityCases: [], maintenanceTickets: [], requests: [], tasks: [] };
-  const filterRows = async <T extends { branchId: number | null }>(table: any) => {
-    const rows = await db.select().from(table).limit(50) as T[];
+  const since = new Date(Date.now() - (period === "day" ? 86400000 : period === "week" ? 604800000 : 2592000000));
+  const filterRows = async <T extends { branchId: number | null; createdAt?: Date | null }>(table: any) => {
+    const rows = await db.select().from(table).where(gte(table.createdAt, since)).limit(100) as T[];
     return user.role === "admin" ? rows : rows.filter((row) => row.branchId == null || ids.includes(row.branchId));
   };
-  const comparison = visible.map((branch, index) => ({ id: branch.id, name: branch.name, city: branch.city, healthScore: branch.healthScore, openActions: branch.openActions, riskLevel: Number(branch.healthScore) < 75 ? "مرتفع" : Number(branch.healthScore) < 85 ? "متوسط" : "مستقر", rank: index + 1 }));
   const [visitsRows, actionRows, documentRows, qualityRows, maintenanceRows, requestRows, taskRows] = await Promise.all([
     filterRows(visits), filterRows(correctiveActions), filterRows(documents), filterRows(qualityCases), filterRows(maintenanceTickets), filterRows(internalRequests), filterRows(tasks),
   ]);
-  return { comparison, visits: visitsRows, actions: actionRows, documents: documentRows, qualityCases: qualityRows, maintenanceTickets: maintenanceRows, requests: requestRows, tasks: taskRows, tasksAndRequests: [...taskRows, ...requestRows] };
+  const scopedTasks = user.role === "admin" ? taskRows : taskRows.filter((row: any) => row.assigneeId === user.id);
+  const scopedRequests = user.role === "admin" ? requestRows : requestRows.filter((row: any) => row.requesterId === user.id);
+  const activityRows = [...visitsRows, ...actionRows, ...qualityRows, ...maintenanceRows, ...scopedRequests, ...scopedTasks] as Array<{ branchId?: number | null }>;
+  const comparison = visible.map((branch, index) => ({ id: branch.id, name: branch.name, city: branch.city, healthScore: branch.healthScore, openActions: branch.openActions, riskLevel: Number(branch.healthScore) < 75 ? "مرتفع" : Number(branch.healthScore) < 85 ? "متوسط" : "مستقر", activityCount: activityRows.filter((row) => row.branchId === branch.id).length, period, rank: index + 1 }));
+  return { comparison, visits: visitsRows, actions: actionRows, documents: documentRows, qualityCases: qualityRows, maintenanceTickets: maintenanceRows, requests: scopedRequests, tasks: scopedTasks, tasksAndRequests: [...scopedTasks, ...scopedRequests] };
 }
 
 export async function getDashboardSummary(user: Pick<User, "id" | "role" | "regionId" | "branchId">) {

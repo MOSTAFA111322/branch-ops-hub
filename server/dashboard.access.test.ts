@@ -118,3 +118,15 @@ describe("operational status transitions", () => {
     await expect(appRouter.createCaller(ctx).maintenance.updateStatus({ id: 1, status: "closed" })).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 });
+
+describe("periodic reports and personal work center", () => {
+  const anonymousContext: TrpcContext = { user: null, req: {} as TrpcContext["req"], res: {} as TrpcContext["res"] };
+
+  it("rejects unauthenticated periodic report reads", async () => {
+    await expect(appRouter.createCaller(anonymousContext).ops.overview({ period: "week" })).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  });
+
+  it("rejects unauthenticated personal task reads", async () => {
+    await expect(appRouter.createCaller(anonymousContext).tasks.list()).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  });
+});
