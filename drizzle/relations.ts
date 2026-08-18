@@ -9,7 +9,6 @@ export const regionsRelations = relations(regions, ({ one, many }) => ({
 
 export const branchesRelations = relations(branches, ({ one, many }) => ({
   region: one(regions, { fields: [branches.regionId], references: [regions.id] }),
-  manager: one(users, { fields: [branches.managerId], references: [users.id] }),
   users: many(users),
 }));
 

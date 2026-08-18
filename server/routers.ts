@@ -81,7 +81,6 @@ export const appRouter = router({
       code: z.string().min(1).max(32),
       name: z.string().min(1).max(160),
       regionId: z.number().int().positive(),
-      managerId: z.number().int().positive().optional(),
       region: z.string().min(1).max(120),
       city: z.string().min(1).max(120),
       managerName: z.string().max(160).optional(),
@@ -90,6 +89,28 @@ export const appRouter = router({
       if (!db) throw new Error("Database unavailable");
       const result = await db.insert(branches).values(input);
       return { id: result[0].insertId, ...input };
+    }),
+    update: roleProcedure(["admin", "area_manager"]).input(z.object({
+      id: z.number().int().positive(),
+      code: z.string().min(1).max(32).optional(),
+      name: z.string().min(1).max(160).optional(),
+      regionId: z.number().int().positive().optional(),
+      region: z.string().min(1).max(120).optional(),
+      city: z.string().min(1).max(120).optional(),
+      managerName: z.string().max(160).nullable().optional(),
+      address: z.string().max(2000).nullable().optional(),
+      phone: z.string().max(32).nullable().optional(),
+      status: z.enum(["active", "paused", "closed"]).optional(),
+    })).mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      const existing = await db.select().from(branches).where(eq(branches.id, input.id)).limit(1);
+      if (!existing[0]) throw new TRPCError({ code: "NOT_FOUND", message: "الفرع غير موجود." });
+      if (ctx.user.role === "area_manager" && existing[0].regionId !== ctx.user.regionId) throw new TRPCError({ code: "FORBIDDEN" });
+      if (ctx.user.role === "area_manager" && (input.regionId !== undefined || input.region !== undefined)) throw new TRPCError({ code: "FORBIDDEN", message: "لا يمكن لمدير المنطقة تغيير نطاق الفرع." });
+      const { id, ...changes } = input;
+      await db.update(branches).set(changes).where(eq(branches.id, id));
+      return { id, ...changes };
     }),
   }),
   financials: router({
