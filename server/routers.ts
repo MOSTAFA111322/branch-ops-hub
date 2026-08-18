@@ -4,6 +4,7 @@ import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, roleProcedure, router } from "./_core/trpc";
 import { eq } from "drizzle-orm";
+import { TRPCError } from "@trpc/server";
 import { getBranchById, getBranchProfile, getDashboardSummary, getOperationsOverview, listBranches, getDb } from "./db";
 import { branches, correctiveActions, documents, internalRequests, maintenanceTickets, qualityCases, tasks, visits } from "../drizzle/schema";
 
@@ -90,7 +91,7 @@ export const appRouter = router({
     }),
   }),
   requests: router({
-    updateStatus: protectedProcedure.input(z.object({ id: z.number().int().positive(), status: z.enum(["new", "assigned", "in_progress", "completed", "rejected"]) })).mutation(async ({ input, ctx }) => { const db = await getDb(); if (!db) throw new Error("Database unavailable"); await db.update(internalRequests).set({ status: input.status }).where(eq(internalRequests.id, input.id)); return { success: true, actorId: ctx.user.id }; }),
+    updateStatus: protectedProcedure.input(z.object({ id: z.number().int().positive(), status: z.enum(["new", "assigned", "in_progress", "completed", "rejected"]) })).mutation(async ({ input, ctx }) => { const db = await getDb(); if (!db) throw new Error("Database unavailable"); const [request] = await db.select().from(internalRequests).where(eq(internalRequests.id, input.id)).limit(1); if (!request) throw new TRPCError({ code: "NOT_FOUND", message: "الطلب غير موجود" }); if (ctx.user.role !== "admin" && request.requesterId !== ctx.user.id) throw new TRPCError({ code: "FORBIDDEN", message: "لا تملك صلاحية تحديث هذا الطلب" }); await db.update(internalRequests).set({ status: input.status }).where(eq(internalRequests.id, input.id)); return { success: true, actorId: ctx.user.id }; }),
     list: protectedProcedure.query(async ({ ctx }) => {
       const db = await getDb();
       if (!db) return [];
@@ -105,7 +106,7 @@ export const appRouter = router({
     }),
   }),
   tasks: router({
-    updateStatus: protectedProcedure.input(z.object({ id: z.number().int().positive(), status: z.enum(["todo", "in_progress", "done"]) })).mutation(async ({ input, ctx }) => { const db = await getDb(); if (!db) throw new Error("Database unavailable"); await db.update(tasks).set({ status: input.status }).where(eq(tasks.id, input.id)); return { success: true, actorId: ctx.user.id }; }),
+    updateStatus: protectedProcedure.input(z.object({ id: z.number().int().positive(), status: z.enum(["todo", "in_progress", "done"]) })).mutation(async ({ input, ctx }) => { const db = await getDb(); if (!db) throw new Error("Database unavailable"); const [task] = await db.select().from(tasks).where(eq(tasks.id, input.id)).limit(1); if (!task) throw new TRPCError({ code: "NOT_FOUND", message: "المهمة غير موجودة" }); if (ctx.user.role !== "admin" && task.assigneeId !== ctx.user.id) throw new TRPCError({ code: "FORBIDDEN", message: "لا تملك صلاحية تحديث هذه المهمة" }); await db.update(tasks).set({ status: input.status }).where(eq(tasks.id, input.id)); return { success: true, actorId: ctx.user.id }; }),
     list: protectedProcedure.query(async ({ ctx }) => {
       const db = await getDb();
       if (!db) return [];
