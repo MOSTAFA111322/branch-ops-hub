@@ -13,6 +13,8 @@ import {
   Filter,
   Gauge,
   LayoutDashboard,
+  ListTodo,
+  Inbox,
   MapPin,
   MoreHorizontal,
   PackageCheck,
@@ -26,6 +28,8 @@ import {
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/_core/hooks/useAuth";
+import * as XLSX from "xlsx";
+import jsPDF from "jspdf";
 import { trpc } from "@/lib/trpc";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -58,6 +62,7 @@ const navItems = [
   { label: "الجودة والشكاوى", icon: CheckCircle2 },
   { label: "الصيانة والأصول", icon: Wrench },
   { label: "التقارير", icon: Gauge },
+  { label: "المهام والطلبات", icon: ListTodo },
 ];
 
 function canAccessNav(label: string, role?: string) {
@@ -65,7 +70,7 @@ function canAccessNav(label: string, role?: string) {
   if (role === "branch_manager") return !["التقارير"].includes(label);
   if (role === "quality") return ["نظرة عامة", "الفروع", "الزيارات والفحص", "الإجراءات والتحسين", "الوثائق والتراخيص", "الجودة والشكاوى"].includes(label);
   if (role === "maintenance") return ["نظرة عامة", "الفروع", "الإجراءات والتحسين", "الصيانة والأصول"].includes(label);
-  if (role === "warehouse" || role === "factory") return ["نظرة عامة", "الفروع", "الإجراءات والتحسين"].includes(label);
+  if (role === "warehouse" || role === "factory") return ["نظرة عامة", "الفروع", "الإجراءات والتحسين", "المهام والطلبات"].includes(label);
   return ["نظرة عامة", "الفروع"].includes(label);
 }
 
@@ -78,19 +83,73 @@ function statusClasses(color: string) {
   }[color] || "bg-slate-50 text-slate-700 border-slate-200";
 }
 
+function downloadExcel(section: string, rows: Array<Record<string, unknown>>) {
+  const normalized = rows.map((row) => ({
+    ID: row.id ?? "",
+    Title: row.title ?? row.name ?? "Operational record",
+    Branch: row.city ?? row.branchId ?? "",
+    Status: row.riskLevel ?? row.status ?? row.priority ?? "",
+    Score: row.healthScore ?? "",
+    OpenActions: row.openActions ?? "",
+    Date: row.createdAt ?? row.dueAt ?? row.expiresAt ?? "",
+  }));
+  const worksheet = XLSX.utils.json_to_sheet(normalized);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, "Report");
+  XLSX.writeFile(workbook, `${section}-report.xlsx`);
+}
+
+function downloadPdf(section: string, rows: Array<Record<string, unknown>>) {
+  const doc = new jsPDF();
+  doc.setFontSize(16);
+  doc.text("Branch Operations Report", 18, 18);
+  doc.setFontSize(10);
+  doc.text(`Section: ${section}`, 18, 27);
+  rows.slice(0, 22).forEach((row, index) => {
+    const y = 38 + index * 8;
+    const line = `${index + 1}. ${String(row.name ?? row.title ?? "Operational record")} | ${String(row.city ?? row.branchId ?? "-")} | ${String(row.status ?? row.riskLevel ?? "-")}`;
+    doc.text(line.slice(0, 115), 18, y);
+  });
+  doc.save(`${section}-report.pdf`);
+}
+
+function OperationsView({ section, user }: { section: string; user?: { role?: string } | null }) {
+  const { data, isLoading, error } = trpc.ops.overview.useQuery(undefined, { enabled: Boolean(user) });
+  const configs: Record<string, { title: string; subtitle: string; key: keyof NonNullable<typeof data>; columns: string[] }> = {
+    "الفروع": { title: "دليل الفروع", subtitle: "ملف مركزي قابل للتصفية لكل فرع", key: "actions", columns: ["الفرع", "المدينة", "الصحة", "المخاطر"] },
+    "الزيارات والفحص": { title: "الزيارات والفحص", subtitle: "خطة الزيارات ومحاضر الفحص ودرجات الالتزام", key: "visits", columns: ["الحالة", "الفرع", "التاريخ", "الملاحظات"] },
+    "الإجراءات والتحسين": { title: "الإجراءات وخطط التحسين", subtitle: "متابعة المسؤول والموعد ودليل الإغلاق", key: "actions", columns: ["العنوان", "الأولوية", "الحالة", "الاستحقاق"] },
+    "الوثائق والتراخيص": { title: "الوثائق والتراخيص", subtitle: "سجل الإصدارات والتنبيهات المبكرة للانتهاء", key: "documents", columns: ["الوثيقة", "الفرع", "الحالة", "الانتهاء"] },
+    "الجودة والشكاوى": { title: "الجودة والشكاوى", subtitle: "عدم المطابقة وتحليل الأسباب المتكررة", key: "qualityCases", columns: ["الحالة", "التصنيف", "الفرع", "الأولوية"] },
+    "الصيانة والأصول": { title: "الصيانة والأصول", subtitle: "الأعطال والصيانة الوقائية والضمانات", key: "maintenanceTickets", columns: ["العطل", "الفرع", "الحالة", "الأولوية"] },
+    "التقارير": { title: "التقارير الموحدة", subtitle: "مقارنة الفروع ومتابعة الاتجاهات التشغيلية", key: "comparison", columns: ["الفرع", "المدينة", "الصحة", "المخاطر"] },
+    "المهام والطلبات": { title: "مركز المهام والطلبات", subtitle: "مهامك الشخصية والطلبات الداخلية المنظمة", key: "tasks", columns: ["المهمة", "الجهة", "الحالة", "التاريخ"] },
+  };
+  const config = configs[section] ?? configs["الفروع"];
+  const rows = data?.[config.key] ?? [];
+  return <section className="mb-6 rounded-3xl border border-[#dfe9df] bg-white p-5 shadow-[0_8px_25px_rgba(39,70,48,0.05)] md:p-6">
+    <div className="flex flex-col justify-between gap-4 border-b border-[#edf1ed] pb-5 md:flex-row md:items-center"><div><p className="text-xs font-semibold text-[#4d8068]">وحدة تشغيلية</p><h2 className="mt-1 text-xl font-bold">{config.title}</h2><p className="mt-1 text-xs text-[#89948b]">{config.subtitle}</p></div><div className="flex flex-wrap gap-2">{section === "التقارير" && <><Button variant="outline" className="rounded-xl text-xs">يومي</Button><Button variant="outline" className="rounded-xl text-xs">أسبوعي</Button><Button variant="outline" className="rounded-xl text-xs">شهري</Button></>}<Button variant="outline" className="rounded-xl text-xs" onClick={() => downloadExcel(section, rows as Array<Record<string, unknown>>)}><FileText className="ml-2 h-3.5 w-3.5" /> Excel</Button><Button variant="outline" className="rounded-xl text-xs" onClick={() => downloadPdf(section, rows as Array<Record<string, unknown>>)}><FileText className="ml-2 h-3.5 w-3.5" /> PDF</Button><Button variant="outline" className="rounded-xl text-xs"><Filter className="ml-2 h-3.5 w-3.5" /> تصفية</Button><Button className="rounded-xl bg-[#174c3d] text-xs"><Plus className="ml-2 h-3.5 w-3.5" /> إضافة سجل</Button></div></div>
+    {error ? <div className="flex min-h-32 flex-col items-center justify-center rounded-2xl bg-[#fff7f3] text-center"><AlertTriangle className="h-7 w-7 text-[#c77a4d]" /><p className="mt-2 text-sm font-semibold text-[#8a563b]">تعذر تحميل بيانات الوحدة</p><p className="mt-1 text-xs text-[#b17b61]">تحقق من الجلسة أو أعد المحاولة لاحقًا.</p></div> : isLoading ? <div className="flex h-28 items-center justify-center text-sm text-[#89948b]">جارٍ تحميل بيانات الوحدة...</div> : rows.length === 0 ? <div className="flex min-h-32 flex-col items-center justify-center rounded-2xl bg-[#f8faf8] text-center"><FileText className="h-7 w-7 text-[#9bb4a1]" /><p className="mt-2 text-sm font-semibold text-[#526359]">لا توجد سجلات ضمن نطاقك حاليًا</p><p className="mt-1 text-xs text-[#94a198]">ستظهر البيانات هنا بعد تسجيل أول عنصر في هذه الوحدة.</p></div> : <div className="mt-5 overflow-x-auto"><table className="w-full min-w-[680px] text-right text-xs"><thead><tr className="border-b border-[#edf1ed] text-[#94a198]">{config.columns.map((column) => <th key={column} className="pb-3 font-medium">{column}</th>)}</tr></thead><tbody>{(rows as Array<Record<string, unknown>>).slice(0, 12).map((row, index) => <tr key={String(row.id ?? index)} className="border-b border-[#f0f3f0] last:border-0"><td className="py-3 font-semibold">{String(row.title ?? row.name ?? row.status ?? "سجل تشغيلي")}</td><td className="py-3 text-[#68766c]">{String(row.city ?? row.branchId ?? row.category ?? "—")}</td><td className="py-3"><Badge variant="outline" className="rounded-full text-[10px]">{String(row.riskLevel ?? row.status ?? row.priority ?? (row.healthScore ? `${row.healthScore}%` : "قيد المتابعة"))}</Badge></td><td className="py-3 text-[#7d8a80]">{String(row.openActions ?? row.dueAt ?? row.expiresAt ?? row.createdAt ?? "—")}</td></tr>)}</tbody></table></div>}
+  </section>;
+}
+
 export default function Home() {
   const [activeNav, setActiveNav] = useState("نظرة عامة");
   const [query, setQuery] = useState("");
   const [showQuickAction, setShowQuickAction] = useState(false);
   const [showAllAlerts, setShowAllAlerts] = useState(false);
-  const [selectedBranch, setSelectedBranch] = useState<(typeof branches)[number] | null>(null);
+  const [selectedBranch, setSelectedBranch] = useState<((typeof branches)[number] & { id?: number }) | null>(null);
   const { user } = useAuth();
-  const { data: liveSummary } = trpc.dashboard.summary.useQuery(undefined, { enabled: Boolean(user) });
+  const { data: liveSummary, error: summaryError } = trpc.dashboard.summary.useQuery(undefined, { enabled: Boolean(user) });
+  const { data: liveBranches } = trpc.branches.list.useQuery(undefined, { enabled: Boolean(user) });
+  const { data: selectedBranchDetail } = trpc.branches.getById.useQuery({ id: selectedBranch?.id ?? 0 }, { enabled: Boolean(user && selectedBranch?.id) });
   const displayBranches = useMemo(() => {
-    if (!liveSummary?.branches?.length) return branches;
-    return liveSummary.branches.map((branch) => {
+    const source = liveBranches?.length ? liveBranches : liveSummary?.branches;
+    if (!source?.length) return branches;
+    return source.map((branch) => {
       const score = Number(branch.healthScore);
       return {
+        id: branch.id,
         name: branch.name,
         area: `${branch.city} · ${branch.region}`,
         score,
@@ -100,7 +159,7 @@ export default function Home() {
         risk: branch.riskLevel === "high" ? "مرتفع" : branch.riskLevel === "medium" ? "متوسط" : "منخفض",
       };
     });
-  }, [liveSummary]);
+  }, [liveBranches, liveSummary]);
   const filteredBranches = useMemo(
     () => displayBranches.filter((branch) => `${branch.name} ${branch.area}`.includes(query.trim())),
     [displayBranches, query],
@@ -174,7 +233,9 @@ export default function Home() {
             <div className="flex gap-2"><Button variant="outline" className="h-10 rounded-xl border-[#dce5dc] bg-white text-xs"><CalendarDays className="ml-2 h-4 w-4 text-[#5e806c]" /> هذا الشهر</Button><Button onClick={() => setShowQuickAction(!showQuickAction)} className="h-10 rounded-xl bg-[#174c3d] text-xs text-white shadow-lg shadow-[#174c3d]/15 hover:bg-[#23634f]"><Plus className="ml-2 h-4 w-4" /> إجراء سريع</Button></div>
           </section>
 
-          {showQuickAction && <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-[#cde1d3] bg-[#edf8f0] p-3 text-sm"><span className="ml-2 font-semibold text-[#174c3d]">إجراء سريع:</span><Button variant="outline" size="sm" className="rounded-lg border-[#bed8c5] bg-white text-xs"><ClipboardCheck className="ml-1 h-3.5 w-3.5" /> جدولة زيارة</Button><Button variant="outline" size="sm" className="rounded-lg border-[#bed8c5] bg-white text-xs"><Wrench className="ml-1 h-3.5 w-3.5" /> فتح بلاغ صيانة</Button><Button variant="outline" size="sm" className="rounded-lg border-[#bed8c5] bg-white text-xs"><FileText className="ml-1 h-3.5 w-3.5" /> رفع وثيقة</Button><button onClick={() => setShowQuickAction(false)} className="mr-auto rounded-lg p-1 text-[#6b8a75] hover:bg-white"><X className="h-4 w-4" /></button></div>}
+          {summaryError && <div className="rounded-2xl border border-[#f1d6c5] bg-[#fff8f4] p-3 text-xs text-[#925e43]">تعذر تحديث لوحة المؤشرات من الخادم. يتم عرض آخر حالة متاحة، ويمكن إعادة المحاولة بتحديث الصفحة.</div>}
+          {showQuickAction && <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-[#cde1d3] bg-[#edf8f0] p-3 text-sm"><span className="ml-2 font-semibold text-[#174c3d]">إجراء سريع:</span><Button variant="outline" size="sm" className="rounded-lg border-[#bed8c5] bg-white text-xs" onClick={() => setActiveNav("الزيارات والفحص")}><ClipboardCheck className="ml-1 h-3.5 w-3.5" /> جدولة زيارة</Button><Button variant="outline" size="sm" className="rounded-lg border-[#bed8c5] bg-white text-xs" onClick={() => setActiveNav("الصيانة والأصول")}><Wrench className="ml-1 h-3.5 w-3.5" /> فتح بلاغ صيانة</Button><Button variant="outline" size="sm" className="rounded-lg border-[#bed8c5] bg-white text-xs" onClick={() => setActiveNav("الوثائق والتراخيص")}><FileText className="ml-1 h-3.5 w-3.5" /> رفع وثيقة</Button><button onClick={() => setShowQuickAction(false)} className="mr-auto rounded-lg p-1 text-[#6b8a75] hover:bg-white"><X className="h-4 w-4" /></button></div>}
+          {activeNav !== "نظرة عامة" && <OperationsView section={activeNav} user={user} />}
 
           <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             {[
@@ -196,7 +257,7 @@ export default function Home() {
             <Card className="border-[#e2e9e2] bg-[#174c3d] text-white shadow-[0_5px_18px_rgba(39,70,48,0.12)]"><CardContent className="p-6"><div className="flex items-start justify-between"><div><p className="text-xs text-white/60">مركز المهام الشخصية</p><h3 className="mt-2 text-xl font-bold">لديك 7 مهام اليوم</h3></div><div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/10"><CheckCircle2 className="h-5 w-5 text-[#a8e0b7]" /></div></div><div className="mt-6 space-y-3"><div className="flex items-center gap-3 rounded-xl bg-white/10 p-3"><div className="h-2 w-2 rounded-full bg-[#f7c47a]" /><div className="flex-1"><p className="text-xs font-semibold">مراجعة محضر زيارة فرع الملقا</p><p className="mt-1 text-[10px] text-white/50">مستحق اليوم · أولوية عالية</p></div><ChevronLeft className="h-4 w-4 text-white/40" /></div><div className="flex items-center gap-3 rounded-xl bg-white/10 p-3"><div className="h-2 w-2 rounded-full bg-[#a8e0b7]" /><div className="flex-1"><p className="text-xs font-semibold">اعتماد خطة تحسين التحلية</p><p className="mt-1 text-[10px] text-white/50">مستحق غدًا · أولوية متوسطة</p></div><ChevronLeft className="h-4 w-4 text-white/40" /></div></div><Button variant="outline" className="mt-5 h-9 w-full rounded-xl border-white/20 bg-transparent text-xs text-white hover:bg-white/10" onClick={() => setActiveNav("الإجراءات والتحسين")}>فتح مركز المهام <ArrowDownLeft className="mr-2 h-3.5 w-3.5" /></Button></CardContent></Card>
           </section>
 
-          {selectedBranch && <div className="fixed inset-0 z-50 flex items-end justify-center bg-[#173126]/20 p-4 backdrop-blur-sm md:items-center" onClick={() => setSelectedBranch(null)}><div className="w-full max-w-xl rounded-3xl border border-[#dfe8df] bg-white p-6 shadow-2xl" onClick={(event) => event.stopPropagation()}><div className="flex items-start justify-between"><div><p className="text-xs font-semibold text-[#5d8a6d]">مصدر المؤشر · ملف الفرع</p><h3 className="mt-1 text-xl font-bold">{selectedBranch.name}</h3><p className="mt-1 text-xs text-[#89948b]">{selectedBranch.area}</p></div><button onClick={() => setSelectedBranch(null)} className="rounded-xl p-2 text-[#8e9a91] hover:bg-[#f1f5f1]"><X className="h-4 w-4" /></button></div><div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4"><div className="rounded-2xl bg-[#eef8f0] p-3"><p className="text-[10px] text-[#769080]">الصحة التشغيلية</p><p className="mt-1 text-xl font-bold text-[#2c8058]">{selectedBranch.score}%</p></div><div className="rounded-2xl bg-[#fff4e3] p-3"><p className="text-[10px] text-[#927858]">الحالة</p><p className="mt-1 text-sm font-bold text-[#a96827]">{selectedBranch.status}</p></div><div className="rounded-2xl bg-[#f3f5f3] p-3"><p className="text-[10px] text-[#7d8b80]">المخاطر</p><p className="mt-1 text-sm font-bold">{selectedBranch.risk}</p></div><div className="rounded-2xl bg-[#edf3fb] p-3"><p className="text-[10px] text-[#71869b]">إجراءات مفتوحة</p><p className="mt-1 text-xl font-bold text-[#4a759e]">{selectedBranch.tasks}</p></div></div><Separator className="my-5" /><div className="flex flex-wrap gap-2"><Button className="rounded-xl bg-[#174c3d] text-xs" onClick={() => setActiveNav("الفروع")}>فتح ملف الفرع الكامل <ArrowDownLeft className="mr-2 h-3.5 w-3.5" /></Button><Button variant="outline" className="rounded-xl text-xs" onClick={() => setActiveNav("الإجراءات والتحسين")}><ShieldCheck className="ml-2 h-3.5 w-3.5" /> عرض الإجراءات</Button><Button variant="outline" className="rounded-xl text-xs" onClick={() => setActiveNav("الزيارات والفحص")}><ClipboardCheck className="ml-2 h-3.5 w-3.5" /> سجل الزيارات</Button></div></div></div>}
+          {selectedBranch && <div className="fixed inset-0 z-50 flex items-end justify-center bg-[#173126]/20 p-4 backdrop-blur-sm md:items-center" onClick={() => setSelectedBranch(null)}><div className="w-full max-w-xl rounded-3xl border border-[#dfe8df] bg-white p-6 shadow-2xl" onClick={(event) => event.stopPropagation()}><div className="flex items-start justify-between"><div><p className="text-xs font-semibold text-[#5d8a6d]">مصدر المؤشر · ملف الفرع</p><h3 className="mt-1 text-xl font-bold">{selectedBranchDetail?.name ?? selectedBranch.name}</h3><p className="mt-1 text-xs text-[#89948b]">{selectedBranch.area}</p></div><button onClick={() => setSelectedBranch(null)} className="rounded-xl p-2 text-[#8e9a91] hover:bg-[#f1f5f1]"><X className="h-4 w-4" /></button></div><div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4"><div className="rounded-2xl bg-[#eef8f0] p-3"><p className="text-[10px] text-[#769080]">الصحة التشغيلية</p><p className="mt-1 text-xl font-bold text-[#2c8058]">{selectedBranch.score}%</p></div><div className="rounded-2xl bg-[#fff4e3] p-3"><p className="text-[10px] text-[#927858]">الحالة</p><p className="mt-1 text-sm font-bold text-[#a96827]">{selectedBranch.status}</p></div><div className="rounded-2xl bg-[#f3f5f3] p-3"><p className="text-[10px] text-[#7d8b80]">المخاطر</p><p className="mt-1 text-sm font-bold">{selectedBranch.risk}</p></div><div className="rounded-2xl bg-[#edf3fb] p-3"><p className="text-[10px] text-[#71869b]">إجراءات مفتوحة</p><p className="mt-1 text-xl font-bold text-[#4a759e]">{selectedBranch.tasks}</p></div></div><Separator className="my-5" /><div className="flex flex-wrap gap-2"><Button className="rounded-xl bg-[#174c3d] text-xs" onClick={() => setActiveNav("الفروع")}>فتح ملف الفرع الكامل <ArrowDownLeft className="mr-2 h-3.5 w-3.5" /></Button><Button variant="outline" className="rounded-xl text-xs" onClick={() => setActiveNav("الإجراءات والتحسين")}><ShieldCheck className="ml-2 h-3.5 w-3.5" /> عرض الإجراءات</Button><Button variant="outline" className="rounded-xl text-xs" onClick={() => setActiveNav("الزيارات والفحص")}><ClipboardCheck className="ml-2 h-3.5 w-3.5" /> سجل الزيارات</Button></div></div></div>}
 
           <footer className="flex flex-col items-center justify-between gap-2 border-t border-[#e3e9e3] pt-4 text-[11px] text-[#9aa49c] sm:flex-row"><span>مرصد الفروع · منصة المتابعة والتحسين التشغيلي</span><span className="flex items-center gap-2"><Clock3 className="h-3.5 w-3.5" /> آخر تحديث: اليوم، 10:42 ص</span></footer>
         </div>

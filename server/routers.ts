@@ -3,7 +3,7 @@ import { COOKIE_NAME } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, roleProcedure, router } from "./_core/trpc";
-import { getBranchById, getDashboardSummary, listBranches, getDb } from "./db";
+import { getBranchById, getDashboardSummary, getOperationsOverview, listBranches, getDb } from "./db";
 import { branches, correctiveActions, tasks } from "../drizzle/schema";
 
 export const appRouter = router({
@@ -50,6 +50,9 @@ export const appRouter = router({
       const result = await db.insert(correctiveActions).values({ ...input, ownerId: ctx.user.id });
       return { id: result[0].insertId };
     }),
+  }),
+  ops: router({
+    overview: protectedProcedure.query(({ ctx }) => getOperationsOverview(ctx.user)),
   }),
   tasks: router({
     list: protectedProcedure.query(async ({ ctx }) => {

@@ -1,6 +1,6 @@
 import { desc, eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { branches, correctiveActions, documents, maintenanceTickets, tasks, users, visits, InsertUser, User } from "../drizzle/schema";
+import { branches, correctiveActions, documents, internalRequests, maintenanceTickets, qualityCases, tasks, users, visits, InsertUser, User } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -58,6 +58,23 @@ export async function getBranchById(id: number) {
   if (!db) return undefined;
   const result = await db.select().from(branches).where(eq(branches.id, id)).limit(1);
   return result[0];
+}
+
+export async function getOperationsOverview(user: Pick<User, "role" | "regionId" | "branchId">) {
+  const db = await getDb();
+  if (!db) return { visits: [], actions: [], documents: [], qualityCases: [], maintenanceTickets: [], requests: [], tasks: [] };
+  const visible = await listBranches(user);
+  const ids = visible.map((branch) => branch.id);
+  if (user.role !== "admin" && !ids.length) return { visits: [], actions: [], documents: [], qualityCases: [], maintenanceTickets: [], requests: [], tasks: [] };
+  const filterRows = async <T extends { branchId: number | null }>(table: any) => {
+    const rows = await db.select().from(table).limit(50) as T[];
+    return user.role === "admin" ? rows : rows.filter((row) => row.branchId == null || ids.includes(row.branchId));
+  };
+  const comparison = visible.map((branch, index) => ({ id: branch.id, name: branch.name, city: branch.city, healthScore: branch.healthScore, openActions: branch.openActions, riskLevel: Number(branch.healthScore) < 75 ? "مرتفع" : Number(branch.healthScore) < 85 ? "متوسط" : "مستقر", rank: index + 1 }));
+  const [visitsRows, actionRows, documentRows, qualityRows, maintenanceRows, requestRows, taskRows] = await Promise.all([
+    filterRows(visits), filterRows(correctiveActions), filterRows(documents), filterRows(qualityCases), filterRows(maintenanceTickets), filterRows(internalRequests), filterRows(tasks),
+  ]);
+  return { comparison, visits: visitsRows, actions: actionRows, documents: documentRows, qualityCases: qualityRows, maintenanceTickets: maintenanceRows, requests: requestRows, tasks: taskRows };
 }
 
 export async function getDashboardSummary(user: Pick<User, "id" | "role" | "regionId" | "branchId">) {
