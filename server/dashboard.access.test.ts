@@ -130,3 +130,36 @@ describe("periodic reports and personal work center", () => {
     await expect(appRouter.createCaller(anonymousContext).tasks.list()).rejects.toMatchObject({ code: "UNAUTHORIZED" });
   });
 });
+
+describe("operational input validation", () => {
+  const adminContext: TrpcContext = { user: { id: 1, openId: "admin", name: "Admin", email: "admin@example.com", role: "admin" }, req: {} as TrpcContext["req"], res: {} as TrpcContext["res"] };
+
+  it("rejects invalid visit scores before database access", async () => {
+    await expect(appRouter.createCaller(adminContext).visits.updateStatus({ id: 1, status: "completed", score: 101 })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  it("rejects invalid request identifiers before database access", async () => {
+    await expect(appRouter.createCaller(adminContext).requests.remove({ id: 0 })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  it("rejects invalid maintenance status values before database access", async () => {
+    await expect(appRouter.createCaller(adminContext).maintenance.updateStatus({ id: 1, status: "unknown" as never })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+});
+
+describe("document editing access", () => {
+  const anonymousContext: TrpcContext = { user: null, req: {} as TrpcContext["req"], res: {} as TrpcContext["res"] };
+  const adminContext: TrpcContext = { user: { id: 1, openId: "admin-docs", name: "Admin", email: "admin@example.com", role: "admin" }, req: {} as TrpcContext["req"], res: {} as TrpcContext["res"] };
+
+  it("rejects unauthenticated document edits", async () => {
+    await expect(appRouter.createCaller(anonymousContext).documents.update({ id: 1, version: "2.0" })).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  });
+
+  it("rejects invalid document update input before database access", async () => {
+    await expect(appRouter.createCaller(adminContext).documents.update({ id: 0, version: "" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  it("rejects malformed document URLs before database access", async () => {
+    await expect(appRouter.createCaller(adminContext).documents.update({ id: 1, fileUrl: "not-a-url" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+});

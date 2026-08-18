@@ -104,6 +104,11 @@ export const visits = mysqlTable("visits", {
   status: mysqlEnum("status", ["scheduled", "in_progress", "completed", "cancelled"]).default("scheduled").notNull(),
   score: decimal("score", { precision: 5, scale: 2 }),
   notes: text("notes"),
+  reportTitle: varchar("reportTitle", { length: 220 }),
+  findings: text("findings"),
+  recommendations: text("recommendations"),
+  approvalStatus: mysqlEnum("approvalStatus", ["draft", "submitted", "approved"]).default("draft").notNull(),
+  approvedAt: timestamp("approvedAt"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
@@ -130,6 +135,18 @@ export const documents = mysqlTable("documents", {
   expiresAt: timestamp("expiresAt"),
   fileUrl: text("fileUrl"),
   status: mysqlEnum("status", ["valid", "expiring", "expired", "missing"]).default("valid").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export const documentVersions = mysqlTable("documentVersions", {
+  id: int("id").autoincrement().primaryKey(),
+  documentId: int("documentId").notNull(),
+  version: varchar("version", { length: 32 }).notNull(),
+  documentType: varchar("documentType", { length: 100 }).notNull(),
+  status: mysqlEnum("status", ["valid", "expiring", "expired", "missing"]).notNull(),
+  expiresAt: timestamp("expiresAt"),
+  fileUrl: text("fileUrl"),
+  recordedBy: int("recordedBy"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
