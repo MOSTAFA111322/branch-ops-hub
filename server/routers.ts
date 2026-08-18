@@ -6,7 +6,7 @@ import { protectedProcedure, publicProcedure, roleProcedure, router } from "./_c
 import { eq } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { getBranchById, getBranchProfile, getDashboardSummary, getOperationsOverview, listBranches, getDb } from "./db";
-import { branches, correctiveActions, documentVersions, documents, internalRequests, maintenanceTickets, qualityCases, tasks, visits } from "../drizzle/schema";
+import { branches, branchAssets, correctiveActions, documentVersions, documents, internalRequests, maintenanceTickets, qualityCases, tasks, visits } from "../drizzle/schema";
 
 export const appRouter = router({
   system: systemRouter,
@@ -101,6 +101,35 @@ export const appRouter = router({
       return { id: result[0].insertId };
     }),
     update: roleProcedure(["admin", "area_manager", "branch_manager", "maintenance"]).input(z.object({ id: z.number().int().positive(), assetName: z.string().min(1).max(160).optional(), title: z.string().min(1).max(220).optional(), ticketType: z.enum(["breakdown", "preventive", "warranty"]).optional(), priority: z.enum(["low", "medium", "high", "urgent"]).optional(), warrantyUntil: z.date().optional() })).mutation(async ({ input }) => { const db = await getDb(); if (!db) throw new Error("Database unavailable"); const [current] = await db.select({ id: maintenanceTickets.id }).from(maintenanceTickets).where(eq(maintenanceTickets.id, input.id)).limit(1); if (!current) throw new TRPCError({ code: "NOT_FOUND", message: "بلاغ الصيانة غير موجود" }); await db.update(maintenanceTickets).set({ assetName: input.assetName, title: input.title, ticketType: input.ticketType, priority: input.priority, warrantyUntil: input.warrantyUntil }).where(eq(maintenanceTickets.id, input.id)); return { success: true }; }),
+  }),
+  assets: router({
+    list: protectedProcedure.input(z.object({ branchId: z.number().int().positive() })).query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return [];
+      return db.select().from(branchAssets).where(eq(branchAssets.branchId, input.branchId)).limit(200);
+    }),
+    create: roleProcedure(["admin", "area_manager", "branch_manager", "maintenance"]).input(z.object({ branchId: z.number().int().positive(), name: z.string().min(1).max(180), assetType: z.string().min(1).max(100), serialNumber: z.string().max(120).optional(), status: z.enum(["active", "maintenance", "retired"]).default("active"), warrantyUntil: z.date().optional() })).mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      const result = await db.insert(branchAssets).values(input);
+      return { id: result[0].insertId };
+    }),
+    update: roleProcedure(["admin", "area_manager", "branch_manager", "maintenance"]).input(z.object({ id: z.number().int().positive(), name: z.string().min(1).max(180).optional(), assetType: z.string().min(1).max(100).optional(), serialNumber: z.string().max(120).optional(), status: z.enum(["active", "maintenance", "retired"]).optional(), warrantyUntil: z.date().optional() })).mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      const [asset] = await db.select().from(branchAssets).where(eq(branchAssets.id, input.id)).limit(1);
+      if (!asset) throw new TRPCError({ code: "NOT_FOUND", message: "الأصل غير موجود" });
+      await db.update(branchAssets).set({ name: input.name ?? asset.name, assetType: input.assetType ?? asset.assetType, serialNumber: input.serialNumber ?? asset.serialNumber, status: input.status ?? asset.status, warrantyUntil: input.warrantyUntil ?? asset.warrantyUntil }).where(eq(branchAssets.id, input.id));
+      return { success: true };
+    }),
+    remove: roleProcedure(["admin", "area_manager", "branch_manager", "maintenance"]).input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      const [asset] = await db.select({ id: branchAssets.id }).from(branchAssets).where(eq(branchAssets.id, input.id)).limit(1);
+      if (!asset) throw new TRPCError({ code: "NOT_FOUND", message: "الأصل غير موجود" });
+      await db.delete(branchAssets).where(eq(branchAssets.id, input.id));
+      return { success: true };
+    }),
   }),
   requests: router({
     remove: protectedProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ input, ctx }) => { const db = await getDb(); if (!db) throw new Error("Database unavailable"); const [request] = await db.select().from(internalRequests).where(eq(internalRequests.id, input.id)).limit(1); if (!request) throw new TRPCError({ code: "NOT_FOUND" }); if (ctx.user.role !== "admin" && request.requesterId !== ctx.user.id) throw new TRPCError({ code: "FORBIDDEN" }); await db.delete(internalRequests).where(eq(internalRequests.id, input.id)); return { success: true }; }),
