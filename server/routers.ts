@@ -6,7 +6,7 @@ import { protectedProcedure, publicProcedure, roleProcedure, router } from "./_c
 import { eq } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { getBranchById, getBranchProfile, getDashboardSummary, getOperationsOverview, listBranches, getDb } from "./db";
-import { branches, branchAssets, correctiveActions, documentVersions, documents, internalRequests, maintenanceTickets, qualityCases, tasks, visits } from "../drizzle/schema";
+import { branches, branchAssets, correctiveActions, documentVersions, documents, internalRequests, maintenanceTickets, qualityCases, tasks, users, visits } from "../drizzle/schema";
 
 export const appRouter = router({
   system: systemRouter,
@@ -20,6 +20,13 @@ export const appRouter = router({
   }),
   dashboard: router({
     summary: protectedProcedure.query(({ ctx }) => getDashboardSummary(ctx.user)),
+  }),
+  users: router({
+    assignees: protectedProcedure.query(async () => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      return db.select({ id: users.id, name: users.name, role: users.role }).from(users).limit(200);
+    }),
   }),
   branches: router({
     list: protectedProcedure.query(({ ctx }) => listBranches(ctx.user)),
@@ -55,7 +62,7 @@ export const appRouter = router({
       const result = await db.insert(correctiveActions).values({ ...input, ownerId: ctx.user.id });
       return { id: result[0].insertId };
     }),
-    update: roleProcedure(["admin", "area_manager", "branch_manager", "quality"]).input(z.object({ id: z.number().int().positive(), title: z.string().min(1).max(220).optional(), description: z.string().optional(), priority: z.enum(["low", "medium", "high", "urgent"]).optional(), dueAt: z.date().optional(), closureEvidenceUrl: z.string().url().optional() })).mutation(async ({ input }) => { const db = await getDb(); if (!db) throw new Error("Database unavailable"); const [current] = await db.select({ id: correctiveActions.id }).from(correctiveActions).where(eq(correctiveActions.id, input.id)).limit(1); if (!current) throw new TRPCError({ code: "NOT_FOUND", message: "الإجراء غير موجود" }); await db.update(correctiveActions).set({ title: input.title, description: input.description, priority: input.priority, dueAt: input.dueAt, closureEvidenceUrl: input.closureEvidenceUrl }).where(eq(correctiveActions.id, input.id)); return { success: true }; }),
+    update: roleProcedure(["admin", "area_manager", "branch_manager", "quality"]).input(z.object({ id: z.number().int().positive(), title: z.string().min(1).max(220).optional(), description: z.string().optional(), ownerId: z.number().int().positive().nullable().optional(), priority: z.enum(["low", "medium", "high", "urgent"]).optional(), dueAt: z.date().optional(), closureEvidenceUrl: z.string().url().optional() })).mutation(async ({ input }) => { const db = await getDb(); if (!db) throw new Error("Database unavailable"); const [current] = await db.select({ id: correctiveActions.id }).from(correctiveActions).where(eq(correctiveActions.id, input.id)).limit(1); if (!current) throw new TRPCError({ code: "NOT_FOUND", message: "الإجراء غير موجود" }); await db.update(correctiveActions).set({ title: input.title, description: input.description, ownerId: input.ownerId, priority: input.priority, dueAt: input.dueAt, closureEvidenceUrl: input.closureEvidenceUrl }).where(eq(correctiveActions.id, input.id)); return { success: true }; }),
   }),
   visits: router({
     remove: roleProcedure(["admin", "area_manager", "branch_manager", "quality"]).input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => { const db = await getDb(); if (!db) throw new Error("Database unavailable"); await db.delete(visits).where(eq(visits.id, input.id)); return { success: true }; }),
