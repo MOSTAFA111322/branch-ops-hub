@@ -63,3 +63,40 @@ describe("branch operations access", () => {
       city: "الرياض",
     })).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
+
+
+describe("operational module access", () => {
+  const anonymousContext: TrpcContext = { user: null, req: {} as TrpcContext["req"], res: {} as TrpcContext["res"] };
+
+  it("rejects unauthenticated operational writes", async () => {
+    const caller = appRouter.createCaller(anonymousContext);
+    await expect(caller.visits.create({ branchId: 1 })).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+    await expect(caller.documents.create({ branchId: 1, title: "رخصة", documentType: "ترخيص" })).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+    await expect(caller.requests.create({ title: "طلب", requestType: "تشغيل" })).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+    await expect(caller.tasks.create({ title: "مهمة" })).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  });
+
+  it("rejects invalid branch identifiers before database access", async () => {
+    const user = { id: 9, openId: "quality-user", name: "الجودة", email: "quality@example.com", loginMethod: "manus", role: "quality" as const, createdAt: new Date(), updatedAt: new Date(), lastSignedIn: new Date() };
+    const ctx: TrpcContext = { user, req: {} as TrpcContext["req"], res: {} as TrpcContext["res"] };
+    await expect(appRouter.createCaller(ctx).visits.create({ branchId: 0 })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+});
+
+describe("branch profile access", () => {
+  const anonymousContext: TrpcContext = { user: null, req: {} as TrpcContext["req"], res: {} as TrpcContext["res"] };
+
+  it("rejects unauthenticated branch profile reads", async () => {
+    const caller = appRouter.createCaller(anonymousContext);
+    await expect(caller.branches.getById({ id: 1 })).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+    await expect(caller.branches.profile({ id: 1 })).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  });
+
+  it("rejects invalid branch profile identifiers before database access", async () => {
+    const user = { id: 10, openId: "profile-user", name: "مراجع", email: "reviewer@example.com", loginMethod: "manus", role: "admin" as const, createdAt: new Date(), updatedAt: new Date(), lastSignedIn: new Date() };
+    const ctx: TrpcContext = { user, req: {} as TrpcContext["req"], res: {} as TrpcContext["res"] };
+    const caller = appRouter.createCaller(ctx);
+    await expect(caller.branches.getById({ id: 0 })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(caller.branches.profile({ id: 0 })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+});

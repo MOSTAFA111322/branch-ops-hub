@@ -40,6 +40,61 @@ export const branches = mysqlTable("branches", {
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 
+export const branchEmployees = mysqlTable("branchEmployees", {
+  id: int("id").autoincrement().primaryKey(),
+  branchId: int("branchId").notNull(),
+  name: varchar("name", { length: 160 }).notNull(),
+  jobTitle: varchar("jobTitle", { length: 120 }).notNull(),
+  employmentStatus: mysqlEnum("employmentStatus", ["active", "on_leave", "inactive"]).default("active").notNull(),
+  phone: varchar("phone", { length: 32 }),
+  joinedAt: timestamp("joinedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export const branchContracts = mysqlTable("branchContracts", {
+  id: int("id").autoincrement().primaryKey(),
+  branchId: int("branchId").notNull(),
+  title: varchar("title", { length: 220 }).notNull(),
+  counterparty: varchar("counterparty", { length: 180 }),
+  contractType: varchar("contractType", { length: 100 }).notNull(),
+  startsAt: timestamp("startsAt"),
+  expiresAt: timestamp("expiresAt"),
+  status: mysqlEnum("status", ["active", "expiring", "expired", "terminated"]).default("active").notNull(),
+  fileUrl: text("fileUrl"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export const branchAssets = mysqlTable("branchAssets", {
+  id: int("id").autoincrement().primaryKey(),
+  branchId: int("branchId").notNull(),
+  name: varchar("name", { length: 180 }).notNull(),
+  assetType: varchar("assetType", { length: 100 }).notNull(),
+  serialNumber: varchar("serialNumber", { length: 120 }),
+  status: mysqlEnum("status", ["active", "maintenance", "retired"]).default("active").notNull(),
+  warrantyUntil: timestamp("warrantyUntil"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export const branchInventory = mysqlTable("branchInventory", {
+  id: int("id").autoincrement().primaryKey(),
+  branchId: int("branchId").notNull(),
+  itemName: varchar("itemName", { length: 180 }).notNull(),
+  unit: varchar("unit", { length: 32 }).notNull(),
+  quantity: decimal("quantity", { precision: 12, scale: 2 }).default("0").notNull(),
+  minimumQuantity: decimal("minimumQuantity", { precision: 12, scale: 2 }).default("0").notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export const branchEvents = mysqlTable("branchEvents", {
+  id: int("id").autoincrement().primaryKey(),
+  branchId: int("branchId").notNull(),
+  eventType: varchar("eventType", { length: 100 }).notNull(),
+  title: varchar("title", { length: 220 }).notNull(),
+  description: text("description"),
+  occurredAt: timestamp("occurredAt").defaultNow().notNull(),
+  createdBy: int("createdBy"),
+});
+
 export const visits = mysqlTable("visits", {
   id: int("id").autoincrement().primaryKey(),
   branchId: int("branchId").notNull(),
