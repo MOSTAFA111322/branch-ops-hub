@@ -90,10 +90,10 @@ export async function getBranchProfile(id: number, user: Pick<User, "role" | "re
 
 export async function getOperationsOverview(user: Pick<User, "id" | "role" | "regionId" | "branchId">, period: "day" | "week" | "month" = "month") {
   const db = await getDb();
-  if (!db) return { visits: [], actions: [], documents: [], qualityCases: [], maintenanceTickets: [], requests: [], tasks: [] };
+  if (!db) return { visits: [], actions: [], documents: [], qualityCases: [], maintenanceTickets: [], requests: [], tasks: [], qualityAnalysis: [] };
   const visible = await listBranches(user);
   const ids = visible.map((branch) => branch.id);
-  if (user.role !== "admin" && !ids.length) return { visits: [], actions: [], documents: [], qualityCases: [], maintenanceTickets: [], requests: [], tasks: [] };
+  if (user.role !== "admin" && !ids.length) return { visits: [], actions: [], documents: [], qualityCases: [], maintenanceTickets: [], requests: [], tasks: [], qualityAnalysis: [] };
   const since = new Date(Date.now() - (period === "day" ? 86400000 : period === "week" ? 604800000 : 2592000000));
   const filterRows = async <T extends { branchId: number | null; createdAt?: Date | null }>(table: any) => {
     const rows = await db.select().from(table).where(gte(table.createdAt, since)).limit(100) as T[];
@@ -105,8 +105,17 @@ export async function getOperationsOverview(user: Pick<User, "id" | "role" | "re
   const scopedTasks = user.role === "admin" ? taskRows : taskRows.filter((row: any) => row.assigneeId === user.id);
   const scopedRequests = user.role === "admin" ? requestRows : requestRows.filter((row: any) => row.requesterId === user.id);
   const activityRows = [...visitsRows, ...actionRows, ...qualityRows, ...maintenanceRows, ...scopedRequests, ...scopedTasks] as Array<{ branchId?: number | null }>;
+  const qualityCounts = new Map<string, { cause: string; count: number; open: number }>();
+  for (const row of qualityRows as Array<{ rootCause?: string | null; category?: string | null; status?: string | null }>) {
+    const cause = row.rootCause?.trim() || row.category?.trim() || "سبب غير محدد";
+    const current = qualityCounts.get(cause) ?? { cause, count: 0, open: 0 };
+    current.count += 1;
+    if (row.status !== "closed" && row.status !== "resolved") current.open += 1;
+    qualityCounts.set(cause, current);
+  }
+  const qualityAnalysis = Array.from(qualityCounts.values()).sort((a, b) => b.count - a.count || b.open - a.open);
   const comparison = visible.map((branch, index) => ({ id: branch.id, name: branch.name, city: branch.city, healthScore: branch.healthScore, openActions: branch.openActions, riskLevel: Number(branch.healthScore) < 75 ? "مرتفع" : Number(branch.healthScore) < 85 ? "متوسط" : "مستقر", activityCount: activityRows.filter((row) => row.branchId === branch.id).length, period, rank: index + 1 }));
-  return { comparison, visits: visitsRows, actions: actionRows, documents: documentRows, qualityCases: qualityRows, maintenanceTickets: maintenanceRows, requests: scopedRequests, tasks: scopedTasks, tasksAndRequests: [...scopedTasks, ...scopedRequests] };
+  return { comparison, visits: visitsRows, actions: actionRows, documents: documentRows, qualityCases: qualityRows, qualityAnalysis, maintenanceTickets: maintenanceRows, requests: scopedRequests, tasks: scopedTasks, tasksAndRequests: [...scopedTasks, ...scopedRequests] };
 }
 
 export async function getDashboardSummary(user: Pick<User, "id" | "role" | "regionId" | "branchId">) {
