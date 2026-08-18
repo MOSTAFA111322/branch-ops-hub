@@ -163,3 +163,40 @@ describe("document editing access", () => {
     await expect(appRouter.createCaller(adminContext).documents.update({ id: 1, fileUrl: "not-a-url" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 });
+
+describe("independent operational updates", () => {
+  const anonymousContext: TrpcContext = { user: null, req: {} as TrpcContext["req"], res: {} as TrpcContext["res"] };
+  const adminContext: TrpcContext = { user: { id: 1, openId: "admin-updates", name: "Admin", email: "admin@example.com", role: "admin" }, req: {} as TrpcContext["req"], res: {} as TrpcContext["res"] };
+
+  it("rejects unauthenticated independent updates", async () => {
+    const caller = appRouter.createCaller(anonymousContext);
+    await expect(caller.actions.update({ id: 1, title: "تحديث" })).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+    await expect(caller.visits.update({ id: 1, notes: "مراجعة" })).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+    await expect(caller.quality.update({ id: 1, rootCause: "سبب" })).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+    await expect(caller.maintenance.update({ id: 1, priority: "high" })).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  });
+
+  it("rejects malformed independent update inputs before database access", async () => {
+    const caller = appRouter.createCaller(adminContext);
+    await expect(caller.actions.update({ id: 0, title: "غير صالح" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(caller.visits.update({ id: 0, score: 101 })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(caller.quality.update({ id: 0, severity: "invalid" as never })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(caller.maintenance.update({ id: 0, priority: "invalid" as never })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+});
+
+describe("independent update role boundaries", () => {
+  const warehouseContext: TrpcContext = { user: { id: 12, openId: "warehouse-boundary", name: "المستودع", email: "warehouse@example.com", loginMethod: "manus", role: "warehouse" as const, createdAt: new Date(), updatedAt: new Date(), lastSignedIn: new Date() }, req: {} as TrpcContext["req"], res: {} as TrpcContext["res"] };
+  const qualityContext: TrpcContext = { user: { id: 13, openId: "quality-boundary", name: "الجودة", email: "quality@example.com", loginMethod: "manus", role: "quality" as const, createdAt: new Date(), updatedAt: new Date(), lastSignedIn: new Date() }, req: {} as TrpcContext["req"], res: {} as TrpcContext["res"] };
+
+  it("rejects warehouse users from non-maintenance updates", async () => {
+    const caller = appRouter.createCaller(warehouseContext);
+    await expect(caller.actions.update({ id: 1, title: "ممنوع" })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(caller.visits.update({ id: 1, notes: "ممنوع" })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(caller.quality.update({ id: 1, rootCause: "ممنوع" })).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("rejects quality users from maintenance updates", async () => {
+    await expect(appRouter.createCaller(qualityContext).maintenance.update({ id: 1, priority: "high" })).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+});
