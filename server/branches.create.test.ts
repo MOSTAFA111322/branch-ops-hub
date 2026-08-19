@@ -1,19 +1,29 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, beforeEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { TrpcContext } from "./_core/context";
+import { branches, regions } from "../drizzle/schema";
 
 const branchRows: Array<Record<string, unknown>> = [];
-const insert = vi.fn(async (input: Record<string, unknown>) => {
-  const row = { id: 42, healthScore: 100, ...input };
+const regionRows: Array<Record<string, unknown>> = [{ id: 3, name: "الوسطى" }];
+const insert = vi.fn(async (table: unknown, input: Record<string, unknown>) => {
+  if (table === regions) {
+    const row = { id: regionRows.length + 1, ...input };
+    regionRows.push(row);
+    return [{ insertId: row.id }];
+  }
+  const row = { id: 42 + branchRows.length, healthScore: 100, ...input };
   branchRows.push(row);
-  return [{ insertId: 42 }];
+  return [{ insertId: row.id }];
 });
 const update = vi.fn(() => ({ where: async () => undefined }));
 const db = {
-  insert: () => ({ values: insert }),
+  insert: (table: unknown) => ({ values: (input: Record<string, unknown>) => insert(table, input) }),
   update: () => ({ set: (changes: Record<string, unknown>) => { const target = branchRows[0]; if (target) Object.assign(target, changes); return update(); } }),
-  select: () => ({ from: () => ({ orderBy: async () => branchRows, where: () => ({ limit: async () => branchRows }) }) }),
+  select: () => ({ from: (table: unknown) => ({
+    orderBy: async () => table === regions ? regionRows : branchRows,
+    where: () => ({ limit: async () => table === regions ? regionRows : branchRows }),
+  }) }),
 };
 
 vi.mock("./db", async importOriginal => {
@@ -29,17 +39,29 @@ const areaManager: TrpcContext = { user: { id: 3, openId: "area-manager", name: 
 const branchInput = { code: "RYD-001", name: "فرع الرياض", regionId: 3, region: "الوسطى", city: "الرياض", managerName: "مدير الفرع" };
 
 describe("branches.create", () => {
-  it("creates a branch and returns the inserted id with its data", async () => {
-    const result = await appRouter.createCaller(admin).branches.create(branchInput);
-    expect(result).toEqual({ id: 42, ...branchInput });
-    expect(insert).toHaveBeenCalledWith(branchInput);
+  beforeEach(() => {
+    branchRows.length = 0;
+    regionRows.length = 0;
+    insert.mockClear();
   });
 
-  it("stores the newly created branch for the directory refresh", () => {
-    expect(branchRows).toEqual([expect.objectContaining({ id: 42, code: "RYD-001", name: "فرع الرياض" })]);
+  it("creates a branch with an existing region and returns the inserted id with its data", async () => {
+    regionRows.push({ id: 3, name: "الوسطى" });
+    const result = await appRouter.createCaller(admin).branches.create(branchInput);
+    expect(result).toEqual({ id: 42, ...branchInput });
+    expect(branchRows).toEqual([expect.objectContaining(branchInput)]);
+  });
+
+  it("creates a missing region before creating the branch", async () => {
+    const result = await appRouter.createCaller(admin).branches.create({ ...branchInput, code: "RYD-002", regionId: 1, region: "الرياض" });
+    expect(result.regionId).toBe(1);
+    expect(regionRows).toContainEqual({ id: 1, name: "الرياض" });
+    expect(branchRows).toContainEqual(expect.objectContaining({ code: "RYD-002", regionId: 1, region: "الرياض" }));
   });
 
   it("updates an existing branch and rejects unauthorized updates", async () => {
+    regionRows.push({ id: 3, name: "الوسطى" });
+    await appRouter.createCaller(admin).branches.create(branchInput);
     const result = await appRouter.createCaller(admin).branches.update({ id: 42, name: "فرع الرياض المحدث", city: "الدرعية" });
     expect(result).toMatchObject({ id: 42, name: "فرع الرياض المحدث", city: "الدرعية" });
     expect(branchRows[0]).toMatchObject({ name: "فرع الرياض المحدث", city: "الدرعية" });
@@ -62,3 +84,6 @@ describe("branches.create", () => {
     await expect(appRouter.createCaller(admin).branches.create({ ...branchInput, code: "" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 });
+
+export { branchRows, regionRows };
+

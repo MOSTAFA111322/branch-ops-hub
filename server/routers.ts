@@ -6,7 +6,7 @@ import { protectedProcedure, publicProcedure, roleProcedure, router } from "./_c
 import { eq, inArray } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { getBranchById, getBranchProfile, getDashboardSummary, getOperationsOverview, listBranches, getDb } from "./db";
-import { branches, branchAssets, branchFinancialSnapshots, checklistItems, checklistTemplates, correctiveActions, documentVersions, documents, internalRequests, maintenanceTickets, qualityCases, tasks, users, visitChecklistResults, visits, auditLogs } from "../drizzle/schema";
+import { branches, regions, branchAssets, branchFinancialSnapshots, checklistItems, checklistTemplates, correctiveActions, documentVersions, documents, internalRequests, maintenanceTickets, qualityCases, tasks, users, visitChecklistResults, visits, auditLogs } from "../drizzle/schema";
 
 async function recordAudit(db: any, input: { actorId?: number; branchId?: number; entityType: string; entityId?: number; action: string; beforeData?: unknown; afterData?: unknown }) {
   await db.insert(auditLogs).values({
@@ -87,8 +87,20 @@ export const appRouter = router({
     })).mutation(async ({ input }) => {
       const db = await getDb();
       if (!db) throw new Error("Database unavailable");
-      const result = await db.insert(branches).values(input);
-      return { id: result[0].insertId, ...input };
+      let resolvedRegionId: number | undefined;
+      const [regionById] = await db.select({ id: regions.id, name: regions.name }).from(regions).where(eq(regions.id, input.regionId)).limit(1);
+      if (regionById) {
+        resolvedRegionId = regionById.id;
+      } else {
+        const [regionByName] = await db.select({ id: regions.id }).from(regions).where(eq(regions.name, input.region)).limit(1);
+        if (regionByName) resolvedRegionId = regionByName.id;
+        else {
+          const createdRegion = await db.insert(regions).values({ name: input.region });
+          resolvedRegionId = Number(createdRegion[0].insertId);
+        }
+      }
+      const result = await db.insert(branches).values({ ...input, regionId: resolvedRegionId });
+      return { id: result[0].insertId, ...input, regionId: resolvedRegionId };
     }),
     update: roleProcedure(["admin", "area_manager"]).input(z.object({
       id: z.number().int().positive(),
