@@ -90,10 +90,10 @@ export async function getBranchProfile(id: number, user: Pick<User, "role" | "re
 
 export async function getOperationsOverview(user: Pick<User, "id" | "role" | "regionId" | "branchId">, period: "day" | "week" | "month" = "month", regionId?: number) {
   const db = await getDb();
-  if (!db) return { visits: [], actions: [], documents: [], qualityCases: [], maintenanceTickets: [], requests: [], tasks: [], qualityAnalysis: [] };
+  if (!db) return { visits: [], actions: [], documents: [], qualityCases: [], maintenanceTickets: [], requests: [], tasks: [], qualityAnalysis: [], operationalSummary: null };
   const visible = (await listBranches(user)).filter((branch) => !regionId || branch.regionId === regionId);
   const ids = visible.map((branch) => branch.id);
-  if (user.role !== "admin" && !ids.length) return { visits: [], actions: [], documents: [], qualityCases: [], maintenanceTickets: [], requests: [], tasks: [], qualityAnalysis: [] };
+  if (user.role !== "admin" && !ids.length) return { visits: [], actions: [], documents: [], qualityCases: [], maintenanceTickets: [], requests: [], tasks: [], qualityAnalysis: [], operationalSummary: null };
   const since = new Date(Date.now() - (period === "day" ? 86400000 : period === "week" ? 604800000 : 2592000000));
   const filterRows = async <T extends { branchId: number | null; createdAt?: Date | null }>(table: any) => {
     const rows = await db.select().from(table).where(gte(table.createdAt, since)).limit(100) as T[];
@@ -115,6 +115,22 @@ export async function getOperationsOverview(user: Pick<User, "id" | "role" | "re
     qualityCounts.set(cause, current);
   }
   const qualityAnalysis = Array.from(qualityCounts.values()).sort((a, b) => b.count - a.count || b.open - a.open);
+  const operationalSummary = {
+    quality: {
+      total: qualityRows.length,
+      open: qualityRows.filter((row: any) => !["closed", "resolved"].includes(row.status)).length,
+      critical: qualityRows.filter((row: any) => row.severity === "critical").length,
+      high: qualityRows.filter((row: any) => row.severity === "high").length,
+    },
+    maintenance: {
+      total: maintenanceRows.length,
+      open: maintenanceRows.filter((row: any) => !["closed", "resolved"].includes(row.status)).length,
+      urgent: maintenanceRows.filter((row: any) => row.priority === "urgent").length,
+      breakdowns: maintenanceRows.filter((row: any) => row.ticketType === "breakdown").length,
+      preventive: maintenanceRows.filter((row: any) => row.ticketType === "preventive").length,
+    },
+    period,
+  };
   const comparison = visible.map((branch, index) => ({ id: branch.id, name: branch.name, city: branch.city, healthScore: branch.healthScore, openActions: branch.openActions, riskLevel: Number(branch.healthScore) < 75 ? "مرتفع" : Number(branch.healthScore) < 85 ? "متوسط" : "مستقر", activityCount: activityRows.filter((row) => row.branchId === branch.id).length, period, rank: index + 1 }));
   const visibleFinancialRows = (user.role === "admin" ? financialRows : financialRows.filter((row) => ids.includes(row.branchId))) as Array<{ branchId: number; periodYear: number; periodMonth: number; revenue: string | number; netProfit: string | number }>;
   const trendMap = new Map<string, { period: string; year: number; month: number; revenue: number; netProfit: number; branches: number }>();
@@ -127,7 +143,7 @@ export async function getOperationsOverview(user: Pick<User, "id" | "role" | "re
     trendMap.set(key, current);
   }
   const financialTrend = Array.from(trendMap.values()).sort((a, b) => a.period.localeCompare(b.period)).slice(-12);
-  return { comparison, financialTrend, visits: visitsRows, actions: actionRows, documents: documentRows, qualityCases: qualityRows, qualityAnalysis, maintenanceTickets: maintenanceRows, requests: scopedRequests, tasks: scopedTasks, tasksAndRequests: [...scopedTasks, ...scopedRequests] };
+  return { comparison, financialTrend, visits: visitsRows, actions: actionRows, documents: documentRows, qualityCases: qualityRows, qualityAnalysis, operationalSummary, maintenanceTickets: maintenanceRows, requests: scopedRequests, tasks: scopedTasks, tasksAndRequests: [...scopedTasks, ...scopedRequests] };
 }
 
 export async function getDashboardSummary(user: Pick<User, "id" | "role" | "regionId" | "branchId">) {

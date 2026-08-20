@@ -48,7 +48,15 @@ export const appRouter = router({
       const hoursSinceLastRun = latestTimestamp ? Math.max(0, Math.round((Date.now() - latestTimestamp) / 3600000)) : null;
       const latencyValues = orderedLogs.map(log => { try { const value = JSON.parse(log.afterData ?? "{}").latencyMs; return typeof value === "number" && Number.isFinite(value) ? value : null; } catch { return null; } }).filter((value): value is number => value !== null);
       const totalRuns = successLogs.length + failureLogs.length;
-      const health = { status: latestLog && failureLogs.includes(latestLog) ? "failed" : hoursSinceLastRun !== null && hoursSinceLastRun > 192 ? "stale" : "healthy", hoursSinceLastRun, lastSuccessAt: successLogs[0]?.createdAt ?? null, lastFailureAt: failureLogs[0]?.createdAt ?? null, successCount: successLogs.length, failureCount: failureLogs.length, successRate: totalRuns ? Math.round((successLogs.length / totalRuns) * 100) : null, averageLatencyMs: latencyValues.length ? Math.round(latencyValues.reduce((sum, value) => sum + value, 0) / latencyValues.length) : null } as const;
+      const successRate = totalRuns ? Math.round((successLogs.length / totalRuns) * 100) : null;
+      const averageLatencyMs = latencyValues.length ? Math.round(latencyValues.reduce((sum, value) => sum + value, 0) / latencyValues.length) : null;
+      const warningReasons = [
+        successRate !== null && successRate < 75 ? "معدل النجاح أقل من 75%" : null,
+        averageLatencyMs !== null && averageLatencyMs >= 30000 ? "متوسط زمن التنفيذ تجاوز 30 ثانية" : null,
+        hoursSinceLastRun !== null && hoursSinceLastRun > 120 ? "مر أكثر من خمسة أيام على آخر تنفيذ" : null,
+      ].filter((reason): reason is string => Boolean(reason));
+      const status = latestLog && failureLogs.includes(latestLog) ? "failed" : hoursSinceLastRun !== null && hoursSinceLastRun > 192 ? "stale" : warningReasons.length ? "warning" : "healthy";
+      const health = { status, warningReasons, hoursSinceLastRun, lastSuccessAt: successLogs[0]?.createdAt ?? null, lastFailureAt: failureLogs[0]?.createdAt ?? null, successCount: successLogs.length, failureCount: failureLogs.length, successRate, averageLatencyMs } as const;
       return { jobs: result.jobs, total: result.total, logs: orderedLogs, health };
     }),
     setEnabled: roleProcedure(["admin"]).input(z.object({ taskUid: z.string().min(1).max(120), enabled: z.boolean() })).mutation(async ({ ctx, input }) => {

@@ -12,6 +12,9 @@ describe("continuous development pack wiring", () => {
     expect(routers).toContain("averageLatencyMs");
     expect(routers).toContain("successCount");
     expect(routers).toContain("failureCount");
+    expect(routers).toContain("warningReasons");
+    expect(routers).toContain("متوسط زمن التنفيذ تجاوز 30 ثانية");
+    expect(readFileSync(new URL("./db.ts", import.meta.url), "utf8")).toContain("operationalSummary");
   });
 
   it("records execution latency for both scheduled handlers", () => {
@@ -28,8 +31,12 @@ describe("continuous development pack wiring", () => {
 
   it("renders accessible health and operational empty/loading states", () => {
     expect(scheduledView).toContain('aria-labelledby="scheduled-health-title"');
+    expect(scheduledView).toContain("تنبيه مبكر للمراجعة");
+    expect(scheduledView).toContain('role="alert"');
     expect(scheduledView).toContain('role="status"');
     expect(home).toContain('aria-live="polite"');
     expect(home).toContain('aria-live="assertive"');
+    expect(home).toContain("مقارنة تشغيلية");
+    expect(home).toContain("الجودة والصيانة خلال الفترة");
   });
 });
