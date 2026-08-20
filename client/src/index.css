@@ -176,3 +176,11 @@
     }
   }
 }
+
+@media print {
+  body { background: #fff !important; }
+  body * { visibility: hidden; }
+  .printable-report, .printable-report * { visibility: visible; }
+  .printable-report { position: absolute; inset: 0; width: 100%; border: 0 !important; box-shadow: none !important; background: #fff !important; }
+  .printable-report .print\:hidden { display: none !important; }
+}
