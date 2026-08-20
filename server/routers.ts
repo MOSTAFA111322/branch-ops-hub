@@ -40,6 +40,19 @@ export const appRouter = router({
       return db.select({ id: users.id, name: users.name, role: users.role }).from(users).limit(200);
     }),
   }),
+  audit: router({
+    list: roleProcedure(["admin", "area_manager"]).input(z.object({ entityType: z.string().max(80).optional(), action: z.string().max(80).optional(), actorId: z.number().int().positive().optional(), branchId: z.number().int().positive().optional(), search: z.string().max(120).optional(), limit: z.number().int().min(1).max(200).default(100) }).optional()).query(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      const visibleBranchIds = ctx.user.role === "admin" ? null : (await listBranches(ctx.user)).map(branch => branch.id);
+      const rows = await db.select().from(auditLogs).orderBy(auditLogs.createdAt).limit(input?.limit ?? 100);
+      const actors = await db.select({ id: users.id, name: users.name, role: users.role }).from(users).limit(500);
+      const branchesRows = await db.select({ id: branches.id, name: branches.name }).from(branches).limit(500);
+      const actorMap = new Map(actors.map(actor => [actor.id, actor]));
+      const branchMap = new Map(branchesRows.map(branch => [branch.id, branch]));
+      return rows.filter(row => (!visibleBranchIds || !row.branchId || visibleBranchIds.includes(row.branchId)) && (!input?.entityType || row.entityType === input.entityType) && (!input?.action || row.action === input.action) && (!input?.actorId || row.actorId === input.actorId) && (!input?.branchId || row.branchId === input.branchId) && (!input?.search || `${row.entityType} ${row.action} ${row.beforeData ?? ""} ${row.afterData ?? ""}`.includes(input.search))).reverse().map(row => ({ ...row, actor: row.actorId ? actorMap.get(row.actorId) ?? null : null, branch: row.branchId ? branchMap.get(row.branchId) ?? null : null }));
+    }),
+  }),
   checklists: router({
     list: roleProcedure(["admin", "area_manager", "branch_manager", "quality"]).query(async () => {
       const db = await getDb();
