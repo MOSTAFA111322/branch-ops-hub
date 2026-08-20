@@ -15,7 +15,8 @@ describe("Boss-level operational extensions", () => {
     const source = readFileSync(resolve(process.cwd(), "client/src/pages/Home.tsx"), "utf8");
     expect(source).toContain("selectedTaskIds");
     expect(source).toContain("الإجراءات الجماعية للمهام");
-    expect(source).toContain("branch-ops-widgets");
+    expect(source).toContain("preferences.getDashboard");
+    expect(source).toContain("saveDashboardPreference");
     expect(source).toContain("تخصيص مؤشرات دورك");
   });
 });
