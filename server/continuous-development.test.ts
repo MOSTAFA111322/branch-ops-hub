@@ -39,4 +39,12 @@ describe("continuous development pack wiring", () => {
     expect(home).toContain("مقارنة تشغيلية");
     expect(home).toContain("الجودة والصيانة خلال الفترة");
   });
+
+  it("exposes admin monitoring controls for warning sensitivity and refresh cadence", () => {
+    expect(scheduledView).toContain("إعدادات المراقبة الإدارية");
+    expect(scheduledView).toContain("warningFailureRate");
+    expect(scheduledView).toContain("warningLatencyMs");
+    expect(scheduledView).toContain("healthRefreshSeconds");
+    expect(scheduledView).toContain("scheduled-report-settings");
+  });
 });
