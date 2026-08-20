@@ -1,5 +1,5 @@
-import { useMemo } from "react";
-import { AlertTriangle, CheckCircle2, Clock3, Play, Pause, RefreshCw } from "lucide-react";
+import { useMemo, useState } from "react";
+import { AlertTriangle, CheckCircle2, Clock3, Play, Pause, RefreshCw, Download } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -13,7 +13,20 @@ export function ScheduledReportsView() {
   });
   const jobs = jobsQuery.data?.jobs ?? [];
   const logs = jobsQuery.data?.logs ?? [];
+  const [logFilter, setLogFilter] = useState<"all" | "success" | "failed" | "control">("all");
+  const [logUserFilter, setLogUserFilter] = useState("");
   const reportLogs = useMemo(() => logs.filter((log) => log.action === "usage_digest" || log.action === "usage_digest_failed" || log.action.startsWith("heartbeat_")), [logs]);
+  const filteredLogs = useMemo(() => reportLogs.filter((log) => {
+    const matchesType = logFilter === "all" || (logFilter === "failed" ? log.action === "usage_digest_failed" : logFilter === "success" ? log.action === "usage_digest" : log.action.startsWith("heartbeat_"));
+    const haystack = `${log.actorId ?? ""} ${log.afterData ?? ""}`.toLocaleLowerCase("ar");
+    return matchesType && (!logUserFilter.trim() || haystack.includes(logUserFilter.trim().toLocaleLowerCase("ar")));
+  }), [logFilter, logUserFilter, reportLogs]);
+  const exportLogs = () => {
+    const rows = filteredLogs.map((log) => [log.createdAt ? new Date(log.createdAt).toLocaleString("ar-SA") : "", log.action, log.actorId ?? "", log.afterData ?? ""]);
+    const csv = ["التاريخ,الإجراء,المستخدم,التفاصيل", ...rows.map((row) => row.map((value) => `"${String(value).replaceAll('"', '""')}"`).join(","))].join("\\n");
+    const url = URL.createObjectURL(new Blob(["\\uFEFF" + csv], { type: "text/csv;charset=utf-8" }));
+    const anchor = document.createElement("a"); anchor.href = url; anchor.download = `سجل-التقارير-${new Date().toISOString().slice(0, 10)}.csv`; anchor.click(); URL.revokeObjectURL(url);
+  };
 
   return (
     <div className="space-y-4" dir="rtl">
@@ -27,8 +40,8 @@ export function ScheduledReportsView() {
         </CardContent>
       </Card>
       <Card className="border-[#dfe9df] bg-white shadow-[0_5px_18px_rgba(39,70,48,0.04)]">
-        <CardHeader><CardTitle className="text-base">سجل التنفيذ والتنبيهات</CardTitle></CardHeader>
-        <CardContent>{reportLogs.length === 0 ? <p className="rounded-xl bg-[#f7faf7] p-5 text-center text-xs text-[#89948b]">لا توجد نتائج تنفيذ مسجلة بعد.</p> : <div className="space-y-2">{reportLogs.slice(0, 12).map((log) => { const failed = log.action === "usage_digest_failed"; return <div key={log.id} className="flex items-start gap-3 rounded-xl border border-[#edf1ed] p-3"><div className={`mt-0.5 rounded-lg p-1.5 ${failed ? "bg-[#fff0ed] text-[#b96556]" : "bg-[#e2f3e7] text-[#2c8a5f]"}`}>{failed ? <AlertTriangle className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}</div><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs font-semibold">{failed ? "فشل تقرير الاستخدام" : log.action === "heartbeat_enabled" ? "تم استئناف الوظيفة" : log.action === "heartbeat_disabled" ? "تم إيقاف الوظيفة" : "تم تنفيذ تقرير الاستخدام"}</p><span className="inline-flex items-center gap-1 text-[10px] text-[#89948b]"><Clock3 className="h-3 w-3" />{log.createdAt ? new Date(log.createdAt).toLocaleString("ar-SA") : "—"}</span></div><p className="mt-1 truncate text-[10px] text-[#89948b]">{log.afterData ?? "سجل تنفيذ موثق"}</p></div></div>})}</div>}</CardContent>
+        <CardHeader className="gap-3"><div className="flex flex-wrap items-center justify-between gap-2"><CardTitle className="text-base">سجل التنفيذ والتنبيهات</CardTitle><Button size="sm" variant="outline" className="gap-1 rounded-xl" onClick={exportLogs} disabled={filteredLogs.length === 0}><Download className="h-3.5 w-3.5" />تصدير CSV</Button></div><div className="flex flex-wrap gap-2"><select aria-label="نوع سجل التنفيذ" value={logFilter} onChange={(event) => setLogFilter(event.target.value as typeof logFilter)} className="h-8 rounded-lg border border-[#dfe9df] bg-white px-2 text-[11px] text-[#476054]"><option value="all">كل السجلات</option><option value="success">نجاح التقارير</option><option value="failed">الإخفاقات</option><option value="control">إيقاف واستئناف</option></select><input aria-label="بحث في مستخدم أو تفاصيل السجل" value={logUserFilter} onChange={(event) => setLogUserFilter(event.target.value)} placeholder="بحث في المستخدم أو التفاصيل" className="h-8 min-w-48 rounded-lg border border-[#dfe9df] px-2 text-[11px] outline-none focus:ring-2 focus:ring-[#9bc7ad]" /></div></CardHeader>
+        <CardContent>{filteredLogs.length === 0 ? <p className="rounded-xl bg-[#f7faf7] p-5 text-center text-xs text-[#89948b]">لا توجد نتائج مطابقة للفلاتر الحالية.</p> : <div className="space-y-2">{filteredLogs.slice(0, 12).map((log) => { const failed = log.action === "usage_digest_failed"; return <div key={log.id} className="flex items-start gap-3 rounded-xl border border-[#edf1ed] p-3"><div className={`mt-0.5 rounded-lg p-1.5 ${failed ? "bg-[#fff0ed] text-[#b96556]" : "bg-[#e2f3e7] text-[#2c8a5f]"}`}>{failed ? <AlertTriangle className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}</div><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs font-semibold">{failed ? "فشل تقرير الاستخدام" : log.action === "heartbeat_enabled" ? "تم استئناف الوظيفة" : log.action === "heartbeat_disabled" ? "تم إيقاف الوظيفة" : "تم تنفيذ تقرير الاستخدام"}</p><span className="inline-flex items-center gap-1 text-[10px] text-[#89948b]"><Clock3 className="h-3 w-3" />{log.createdAt ? new Date(log.createdAt).toLocaleString("ar-SA") : "—"}</span></div><p className="mt-1 truncate text-[10px] text-[#89948b]">{log.afterData ?? "سجل تنفيذ موثق"}</p></div></div>})}</div>}</CardContent>
       </Card>
     </div>
   );
