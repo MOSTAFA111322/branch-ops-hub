@@ -295,15 +295,22 @@ export const appRouter = router({
     list: protectedProcedure.query(async ({ ctx }) => {
       const db = await getDb();
       if (!db) return [];
-      return db.select().from(tasks).where(eq(tasks.assigneeId, ctx.user.id)).limit(20);
+      if (ctx.user.role === "admin") return db.select().from(tasks).orderBy(tasks.createdAt).limit(100);
+      return db.select().from(tasks).where(eq(tasks.assigneeId, ctx.user.id)).orderBy(tasks.createdAt).limit(50);
     }),
-    create: protectedProcedure.input(z.object({ branchId: z.number().int().positive().optional(), title: z.string().min(1).max(220), priority: z.enum(["low", "medium", "high", "urgent"]).default("medium"), dueAt: z.date().optional() })).mutation(async ({ input, ctx }) => {
+    create: protectedProcedure.input(z.object({ branchId: z.number().int().positive().optional(), title: z.string().min(1).max(220), priority: z.enum(["low", "medium", "high", "urgent"]).default("medium"), dueAt: z.date().optional(), assigneeId: z.number().int().positive().optional() })).mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new Error("Database unavailable");
-      const result = await db.insert(tasks).values({ ...input, assigneeId: ctx.user.id });
+      const canAssign = ctx.user.role === "admin" || ctx.user.role === "area_manager";
+      if (input.assigneeId && !canAssign && input.assigneeId !== ctx.user.id) throw new TRPCError({ code: "FORBIDDEN", message: "لا تملك صلاحية تعيين المهمة" });
+      const assigneeId = input.assigneeId ?? ctx.user.id;
+      const [assignee] = await db.select({ id: users.id }).from(users).where(eq(users.id, assigneeId)).limit(1);
+      if (!assignee) throw new TRPCError({ code: "NOT_FOUND", message: "المسؤول المحدد غير موجود" });
+      const result = await db.insert(tasks).values({ branchId: input.branchId, title: input.title, priority: input.priority, dueAt: input.dueAt, assigneeId });
+      await recordAudit(db, { actorId: ctx.user.id, branchId: input.branchId, entityType: "task", entityId: Number(result[0].insertId), action: "assign", afterData: { ...input, assigneeId } });
       return { id: result[0].insertId };
     }),
-    update: protectedProcedure.input(z.object({ id: z.number().int().positive(), title: z.string().min(1).max(220).optional(), priority: z.enum(["low", "medium", "high", "urgent"]).optional(), dueAt: z.date().optional() })).mutation(async ({ input, ctx }) => { const db = await getDb(); if (!db) throw new Error("Database unavailable"); const [task] = await db.select().from(tasks).where(eq(tasks.id, input.id)).limit(1); if (!task) throw new TRPCError({ code: "NOT_FOUND", message: "المهمة غير موجودة" }); if (ctx.user.role !== "admin" && task.assigneeId !== ctx.user.id) throw new TRPCError({ code: "FORBIDDEN", message: "لا تملك صلاحية تحرير هذه المهمة" }); await db.update(tasks).set({ title: input.title ?? task.title, priority: input.priority ?? task.priority, dueAt: input.dueAt ?? task.dueAt }).where(eq(tasks.id, input.id)); return { success: true }; }),
+    update: protectedProcedure.input(z.object({ id: z.number().int().positive(), title: z.string().min(1).max(220).optional(), priority: z.enum(["low", "medium", "high", "urgent"]).optional(), dueAt: z.date().optional(), assigneeId: z.number().int().positive().nullable().optional() })).mutation(async ({ input, ctx }) => { const db = await getDb(); if (!db) throw new Error("Database unavailable"); const [task] = await db.select().from(tasks).where(eq(tasks.id, input.id)).limit(1); if (!task) throw new TRPCError({ code: "NOT_FOUND", message: "المهمة غير موجودة" }); const canAssign = ctx.user.role === "admin" || ctx.user.role === "area_manager"; if (ctx.user.role !== "admin" && task.assigneeId !== ctx.user.id && !canAssign) throw new TRPCError({ code: "FORBIDDEN", message: "لا تملك صلاحية تحرير هذه المهمة" }); if (input.assigneeId !== undefined && !canAssign) throw new TRPCError({ code: "FORBIDDEN", message: "لا تملك صلاحية إعادة تعيين المهمة" }); if (input.assigneeId) { const [assignee] = await db.select({ id: users.id }).from(users).where(eq(users.id, input.assigneeId)).limit(1); if (!assignee) throw new TRPCError({ code: "NOT_FOUND", message: "المسؤول المحدد غير موجود" }); } await db.update(tasks).set({ title: input.title ?? task.title, priority: input.priority ?? task.priority, dueAt: input.dueAt ?? task.dueAt, assigneeId: input.assigneeId === undefined ? task.assigneeId : input.assigneeId }).where(eq(tasks.id, input.id)); await recordAudit(db, { actorId: ctx.user.id, branchId: task.branchId ?? undefined, entityType: "task", entityId: input.id, action: input.assigneeId !== undefined && input.assigneeId !== task.assigneeId ? "reassign" : "update", beforeData: task, afterData: input }); return { success: true }; }),
   }),
   ops: router({
     overview: protectedProcedure.input(z.object({ period: z.enum(["day", "week", "month"]).default("month") }).optional()).query(({ ctx, input }) => getOperationsOverview(ctx.user, input?.period ?? "month")),

@@ -9,10 +9,14 @@ export const MONTHLY_REPORT_RECIPIENT_ROLES = ["admin", "area_manager", "quality
 
 export async function monthlyFinancialReportHandler(req: Request, res: Response) {
   const context = { url: req.originalUrl, timestamp: new Date().toISOString() };
+  let db: Awaited<ReturnType<typeof getDb>> = null;
+  let actorId: number | undefined;
+  let marker = "monthly-financial-report:unknown";
   try {
     const user = await sdk.authenticateRequest(req);
+    actorId = user.id;
     if (!user.isCron || !user.taskUid) return res.status(403).json({ error: "cron-only" });
-    const db = await getDb();
+    db = await getDb();
     if (!db) return res.status(503).json({ error: "database-unavailable", context });
 
     const previous = new Date();
@@ -20,7 +24,7 @@ export async function monthlyFinancialReportHandler(req: Request, res: Response)
     previous.setUTCMonth(previous.getUTCMonth() - 1);
     const year = previous.getUTCFullYear();
     const month = previous.getUTCMonth() + 1;
-    const marker = `monthly-financial-report:${year}-${String(month).padStart(2, "0")}`;
+    marker = `monthly-financial-report:${year}-${String(month).padStart(2, "0")}`;
     const auditRows = await db.select({ afterData: auditLogs.afterData }).from(auditLogs).where(eq(auditLogs.action, "scheduled_report"));
     if (auditRows.some(row => row.afterData?.includes(marker))) return res.json({ ok: true, skipped: "already-sent", marker });
 
@@ -36,7 +40,14 @@ export async function monthlyFinancialReportHandler(req: Request, res: Response)
     await db.insert(auditLogs).values({ actorId: user.id, entityType: "scheduled_report", action: "scheduled_report", afterData: JSON.stringify({ marker, delivered, taskUid: user.taskUid, recipientIds: recipients.map((recipient) => recipient.id), recipientRoles: recipients.map((recipient) => recipient.role) }) });
     return res.json({ ok: true, delivered, marker });
   } catch (error) {
-    return res.status(500).json({ error: String(error), stack: error instanceof Error ? error.stack : undefined, context });
+    const message = error instanceof Error ? error.message : String(error);
+    try {
+      await notifyOwner({ title: "فشل التقرير المالي الشهري", content: `تعذر تنفيذ التقرير المجدول ${marker}. السبب: ${message}` });
+      if (db) await db.insert(auditLogs).values({ actorId, entityType: "scheduled_report", action: "scheduled_report_failed", afterData: JSON.stringify({ marker, delivered: false, error: message, context }) });
+    } catch (notificationError) {
+      console.error("[ScheduledReport] failure notification failed", notificationError);
+    }
+    return res.status(500).json({ error: message, context });
   }
 }
 

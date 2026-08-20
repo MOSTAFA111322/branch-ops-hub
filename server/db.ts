@@ -1,6 +1,6 @@
 import { desc, eq, inArray, gte } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { branches, branchAssets, branchContracts, branchEmployees, branchEvents, branchInventory, correctiveActions, documents, internalRequests, maintenanceTickets, qualityCases, tasks, users, visits, InsertUser, User } from "../drizzle/schema";
+import { branches, branchAssets, branchContracts, branchEmployees, branchEvents, branchInventory, branchFinancialSnapshots, correctiveActions, documents, internalRequests, maintenanceTickets, qualityCases, tasks, users, visits, InsertUser, User } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -99,8 +99,9 @@ export async function getOperationsOverview(user: Pick<User, "id" | "role" | "re
     const rows = await db.select().from(table).where(gte(table.createdAt, since)).limit(100) as T[];
     return user.role === "admin" ? rows : rows.filter((row) => row.branchId == null || ids.includes(row.branchId));
   };
-  const [visitsRows, actionRows, documentRows, qualityRows, maintenanceRows, requestRows, taskRows] = await Promise.all([
+  const [visitsRows, actionRows, documentRows, qualityRows, maintenanceRows, requestRows, taskRows, financialRows] = await Promise.all([
     filterRows(visits), filterRows(correctiveActions), filterRows(documents), filterRows(qualityCases), filterRows(maintenanceTickets), filterRows(internalRequests), filterRows(tasks),
+    db.select().from(branchFinancialSnapshots).orderBy(desc(branchFinancialSnapshots.periodYear), desc(branchFinancialSnapshots.periodMonth)).limit(240),
   ]);
   const scopedTasks = user.role === "admin" ? taskRows : taskRows.filter((row: any) => row.assigneeId === user.id);
   const scopedRequests = user.role === "admin" ? requestRows : requestRows.filter((row: any) => row.requesterId === user.id);
@@ -115,7 +116,18 @@ export async function getOperationsOverview(user: Pick<User, "id" | "role" | "re
   }
   const qualityAnalysis = Array.from(qualityCounts.values()).sort((a, b) => b.count - a.count || b.open - a.open);
   const comparison = visible.map((branch, index) => ({ id: branch.id, name: branch.name, city: branch.city, healthScore: branch.healthScore, openActions: branch.openActions, riskLevel: Number(branch.healthScore) < 75 ? "مرتفع" : Number(branch.healthScore) < 85 ? "متوسط" : "مستقر", activityCount: activityRows.filter((row) => row.branchId === branch.id).length, period, rank: index + 1 }));
-  return { comparison, visits: visitsRows, actions: actionRows, documents: documentRows, qualityCases: qualityRows, qualityAnalysis, maintenanceTickets: maintenanceRows, requests: scopedRequests, tasks: scopedTasks, tasksAndRequests: [...scopedTasks, ...scopedRequests] };
+  const visibleFinancialRows = (user.role === "admin" ? financialRows : financialRows.filter((row) => ids.includes(row.branchId))) as Array<{ branchId: number; periodYear: number; periodMonth: number; revenue: string | number; netProfit: string | number }>;
+  const trendMap = new Map<string, { period: string; year: number; month: number; revenue: number; netProfit: number; branches: number }>();
+  for (const row of visibleFinancialRows) {
+    const key = `${row.periodYear}-${String(row.periodMonth).padStart(2, "0")}`;
+    const current = trendMap.get(key) ?? { period: key, year: row.periodYear, month: row.periodMonth, revenue: 0, netProfit: 0, branches: 0 };
+    current.revenue += Number(row.revenue ?? 0);
+    current.netProfit += Number(row.netProfit ?? 0);
+    current.branches += 1;
+    trendMap.set(key, current);
+  }
+  const financialTrend = Array.from(trendMap.values()).sort((a, b) => a.period.localeCompare(b.period)).slice(-12);
+  return { comparison, financialTrend, visits: visitsRows, actions: actionRows, documents: documentRows, qualityCases: qualityRows, qualityAnalysis, maintenanceTickets: maintenanceRows, requests: scopedRequests, tasks: scopedTasks, tasksAndRequests: [...scopedTasks, ...scopedRequests] };
 }
 
 export async function getDashboardSummary(user: Pick<User, "id" | "role" | "regionId" | "branchId">) {
