@@ -40,7 +40,16 @@ export const appRouter = router({
       const result = await listHeartbeatJobs("");
       const db = await getDb();
       const logs = db ? await db.select().from(auditLogs).where(eq(auditLogs.entityType, "scheduled_report")).limit(200) : [];
-      return { jobs: result.jobs, total: result.total, logs: logs.reverse() };
+      const orderedLogs = logs.reverse();
+      const successLogs = orderedLogs.filter(log => log.action === "usage_digest" || log.action === "scheduled_report");
+      const failureLogs = orderedLogs.filter(log => log.action === "usage_digest_failed" || log.action === "scheduled_report_failed");
+      const latestLog = orderedLogs[0];
+      const latestTimestamp = latestLog?.createdAt ? new Date(latestLog.createdAt).getTime() : null;
+      const hoursSinceLastRun = latestTimestamp ? Math.max(0, Math.round((Date.now() - latestTimestamp) / 3600000)) : null;
+      const latencyValues = orderedLogs.map(log => { try { const value = JSON.parse(log.afterData ?? "{}").latencyMs; return typeof value === "number" && Number.isFinite(value) ? value : null; } catch { return null; } }).filter((value): value is number => value !== null);
+      const totalRuns = successLogs.length + failureLogs.length;
+      const health = { status: latestLog && failureLogs.includes(latestLog) ? "failed" : hoursSinceLastRun !== null && hoursSinceLastRun > 192 ? "stale" : "healthy", hoursSinceLastRun, lastSuccessAt: successLogs[0]?.createdAt ?? null, lastFailureAt: failureLogs[0]?.createdAt ?? null, successCount: successLogs.length, failureCount: failureLogs.length, successRate: totalRuns ? Math.round((successLogs.length / totalRuns) * 100) : null, averageLatencyMs: latencyValues.length ? Math.round(latencyValues.reduce((sum, value) => sum + value, 0) / latencyValues.length) : null } as const;
+      return { jobs: result.jobs, total: result.total, logs: orderedLogs, health };
     }),
     setEnabled: roleProcedure(["admin"]).input(z.object({ taskUid: z.string().min(1).max(120), enabled: z.boolean() })).mutation(async ({ ctx, input }) => {
       const result = await updateHeartbeatJob(input.taskUid, { enable: input.enabled }, "");
