@@ -88,10 +88,10 @@ export async function getBranchProfile(id: number, user: Pick<User, "role" | "re
   return { branch, employees, contracts, assets, inventory, documents: documentsRows, actions, qualityCases: qualityRows, maintenanceTickets: maintenanceRows, events, visits: visitsRows, requests, tasks: tasksRows };
 }
 
-export async function getOperationsOverview(user: Pick<User, "id" | "role" | "regionId" | "branchId">, period: "day" | "week" | "month" = "month") {
+export async function getOperationsOverview(user: Pick<User, "id" | "role" | "regionId" | "branchId">, period: "day" | "week" | "month" = "month", regionId?: number) {
   const db = await getDb();
   if (!db) return { visits: [], actions: [], documents: [], qualityCases: [], maintenanceTickets: [], requests: [], tasks: [], qualityAnalysis: [] };
-  const visible = await listBranches(user);
+  const visible = (await listBranches(user)).filter((branch) => !regionId || branch.regionId === regionId);
   const ids = visible.map((branch) => branch.id);
   if (user.role !== "admin" && !ids.length) return { visits: [], actions: [], documents: [], qualityCases: [], maintenanceTickets: [], requests: [], tasks: [], qualityAnalysis: [] };
   const since = new Date(Date.now() - (period === "day" ? 86400000 : period === "week" ? 604800000 : 2592000000));
