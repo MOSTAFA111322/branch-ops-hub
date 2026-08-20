@@ -51,7 +51,38 @@ export async function monthlyFinancialReportHandler(req: Request, res: Response)
   }
 }
 
-export const scheduledHandlers = { monthlyFinancialReportHandler };
+export async function commandUsageDigestHandler(req: Request, res: Response) {
+  const context = { url: req.originalUrl, timestamp: new Date().toISOString() };
+  let db: Awaited<ReturnType<typeof getDb>> = null;
+  let actorId: number | undefined;
+  let marker = "command-usage-digest:unknown";
+  try {
+    const user = await sdk.authenticateRequest(req);
+    actorId = user.id;
+    if (!user.isCron || !user.taskUid) return res.status(403).json({ error: "cron-only" });
+    db = await getDb();
+    if (!db) return res.status(503).json({ error: "database-unavailable", context });
+    const now = new Date();
+    marker = `command-usage-digest:${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+    const existing = await db.select({ afterData: auditLogs.afterData }).from(auditLogs).where(eq(auditLogs.action, "usage_digest"));
+    if (existing.some(row => row.afterData?.includes(marker))) return res.json({ ok: true, skipped: "already-sent", marker });
+    const since = new Date(now.getTime() - 30 * 86400000);
+    const rows = await db.select().from(auditLogs).where(eq(auditLogs.entityType, "command_usage")).limit(2000);
+    const counts = new Map<string, number>();
+    rows.filter(row => row.createdAt >= since).forEach(row => { try { const command = JSON.parse(row.afterData ?? "{}").command ?? "غير محدد"; counts.set(command, (counts.get(command) ?? 0) + 1); } catch { counts.set("غير محدد", (counts.get("غير محدد") ?? 0) + 1); } });
+    const top = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 10);
+    const content = `الفترة: آخر 30 يومًا\nإجمالي الاستخدامات: ${rows.filter(row => row.createdAt >= since).length}\nالأوامر الأكثر استعمالًا: ${top.map(([command, count]) => `${command} (${count})`).join("، ") || "لا توجد بيانات"}`;
+    const delivered = await notifyOwner({ title: "ملخص استخدام أوامر مركز التشغيل", content });
+    await db.insert(auditLogs).values({ actorId: user.id, entityType: "scheduled_report", action: "usage_digest", afterData: JSON.stringify({ marker, delivered, taskUid: user.taskUid, top }) });
+    return res.json({ ok: true, delivered, marker, top });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    try { await notifyOwner({ title: "فشل ملخص استخدام مركز التشغيل", content: `تعذر تنفيذ التقرير الدوري ${marker}. السبب: ${message}` }); if (db) await db.insert(auditLogs).values({ actorId, entityType: "scheduled_report", action: "usage_digest_failed", afterData: JSON.stringify({ marker, error: message, context }) }); } catch (notificationError) { console.error("[UsageDigest] failure notification failed", notificationError); }
+    return res.status(500).json({ error: message, context });
+  }
+}
+
+export const scheduledHandlers = { monthlyFinancialReportHandler, commandUsageDigestHandler };
 
 void scheduledHandlers;
 
