@@ -82,6 +82,31 @@ export async function commandUsageDigestHandler(req: Request, res: Response) {
   }
 }
 
+export async function retryCommandUsageDigest(actorId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const now = new Date();
+  const marker = `command-usage-digest:${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+  const existing = await db.select({ afterData: auditLogs.afterData }).from(auditLogs).where(eq(auditLogs.action, "usage_digest"));
+  if (existing.some((row) => row.afterData?.includes(marker))) return { ok: true, skipped: "already-sent", marker } as const;
+  try {
+    const since = new Date(now.getTime() - 30 * 86400000);
+    const rows = await db.select().from(auditLogs).where(eq(auditLogs.entityType, "command_usage")).limit(2000);
+    const counts = new Map<string, number>();
+    rows.filter((row) => row.createdAt >= since).forEach((row) => { try { const command = JSON.parse(row.afterData ?? "{}").command ?? "غير محدد"; counts.set(command, (counts.get(command) ?? 0) + 1); } catch { counts.set("غير محدد", (counts.get("غير محدد") ?? 0) + 1); } });
+    const top = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 10);
+    const content = `إعادة تشغيل يدوية من المسؤول\nالفترة: آخر 30 يومًا\nإجمالي الاستخدامات: ${rows.filter((row) => row.createdAt >= since).length}\nالأوامر الأكثر استعمالًا: ${top.map(([command, count]) => `${command} (${count})`).join("، ") || "لا توجد بيانات"}`;
+    const delivered = await notifyOwner({ title: "إعادة تشغيل ملخص استخدام أوامر مركز التشغيل", content });
+    await db.insert(auditLogs).values({ actorId, entityType: "scheduled_report", action: "usage_digest_retry", afterData: JSON.stringify({ marker, delivered, top }) });
+    return { ok: true, marker, top } as const;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await db.insert(auditLogs).values({ actorId, entityType: "scheduled_report", action: "usage_digest_failed", afterData: JSON.stringify({ marker, error: message, source: "manual_retry" }) });
+    await notifyOwner({ title: "فشل إعادة تشغيل ملخص الاستخدام", content: `تعذر تنفيذ إعادة المحاولة ${marker}. السبب: ${message}` });
+    throw error;
+  }
+}
+
 export const scheduledHandlers = { monthlyFinancialReportHandler, commandUsageDigestHandler };
 
 void scheduledHandlers;
