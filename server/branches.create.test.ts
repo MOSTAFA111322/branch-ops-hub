@@ -48,7 +48,7 @@ describe("branches.create", () => {
   it("creates a branch with an existing region and returns the inserted id with its data", async () => {
     regionRows.push({ id: 3, name: "الوسطى" });
     const result = await appRouter.createCaller(admin).branches.create(branchInput);
-    expect(result).toEqual({ id: 42, ...branchInput });
+    expect(result).toEqual({ id: 42, ...branchInput, operationalType: "branch" });
     expect(branchRows).toEqual([expect.objectContaining(branchInput)]);
   });
 

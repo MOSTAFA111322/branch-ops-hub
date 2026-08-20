@@ -25,6 +25,7 @@ import {
   ShieldCheck,
   Sparkles,
   Wrench,
+  Warehouse,
   X,
 } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -344,7 +345,8 @@ export default function Home() {
         name: branch.name,
         area: `${branch.city} · ${branch.region}`,
         score,
-        status: score >= 92 ? "ممتاز" : score >= 85 ? "مستقر" : "يحتاج متابعة",
+        status: branch.status === "active" ? "نشط" : branch.status === "paused" ? "غير نشط" : "مغلق",
+        operationalType: branch.operationalType === "representative" ? "مندوب" : branch.operationalType === "warehouse" ? "مستودع" : "فرع",
         color: score >= 85 ? "emerald" : score >= 75 ? "amber" : "rose",
         tasks: branch.openActions,
         risk: branch.riskLevel === "high" ? "مرتفع" : branch.riskLevel === "medium" ? "متوسط" : "منخفض",
@@ -422,7 +424,7 @@ export default function Home() {
 
         <div className="space-y-6 px-5 py-6 md:px-8 md:py-8">
           <section className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
-            <div><div className="mb-2 flex items-center gap-2 text-xs font-semibold text-[#4d8068]"><span className="h-2 w-2 rounded-full bg-[#5cab7c]" /> حالة الشبكة مستقرة</div><h2 className="text-2xl font-bold tracking-tight md:text-[30px]">نظرة عامة على الفروع</h2><p className="mt-2 text-sm text-[#7a857c]">متابعة تشغيلية موحدة لـ 9 فروع، مع التركيز على ما يحتاج قرارًا اليوم.</p></div>
+            <div><div className="mb-2 flex items-center gap-2 text-xs font-semibold text-[#4d8068]"><span className="h-2 w-2 rounded-full bg-[#5cab7c]" /> حالة الشبكة مستقرة</div><h2 className="text-2xl font-bold tracking-tight md:text-[30px]">نظرة عامة على الفروع</h2><p className="mt-2 text-sm text-[#7a857c]">متابعة تشغيلية موحدة لـ {liveSummary?.activeBranchesCount ?? 0} فروع نشطة، مع إبقاء المندوبين والمستودعات ضمن الدليل دون احتسابهم تشغيليًا.</p></div>
             <div className="flex gap-2"><Button variant="outline" className="h-10 rounded-xl border-[#dce5dc] bg-white text-xs"><CalendarDays className="ml-2 h-4 w-4 text-[#5e806c]" /> هذا الشهر</Button><Button onClick={() => setShowQuickAction(!showQuickAction)} className="h-10 rounded-xl bg-[#174c3d] text-xs text-white shadow-lg shadow-[#174c3d]/15 hover:bg-[#23634f]"><Plus className="ml-2 h-4 w-4" /> إجراء سريع</Button></div>
           </section>
 
@@ -432,11 +434,12 @@ export default function Home() {
 
           <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             {[
-              { label: "مؤشر صحة الفروع", value: `${networkHealth}%`, change: liveBranches?.length ? "بيانات مباشرة" : "بانتظار البيانات", hint: "متوسط الفروع الظاهرة ضمن نطاقك", icon: Gauge, tone: "green", progress: networkHealth },
+              { label: "الفروع النشطة", value: liveSummary ? String(liveSummary.activeBranchesCount) : "—", change: liveSummary ? `${liveSummary.inactiveBranchesCount} غير نشط` : "بانتظار البيانات", hint: "فروع التشغيل فقط", icon: Building2, tone: "green", progress: liveSummary?.activeBranchesCount ? Math.min(100, liveSummary.activeBranchesCount * 10) : 0 },
+              { label: "المندوبون والمستودعات", value: liveSummary ? String(liveSummary.representativesCount + liveSummary.warehousesCount) : "—", change: liveSummary ? `${liveSummary.representativesCount} مندوب · ${liveSummary.warehousesCount} مستودع` : "بانتظار البيانات", hint: "ضمن الدليل دون احتسابهم كفروع نشطة", icon: Warehouse, tone: "purple", progress: 0 },
               { label: "إجراءات مفتوحة", value: liveSummary ? String(liveSummary.openActions) : "—", change: liveSummary ? `${liveSummary.openMaintenance} صيانة` : "بانتظار البيانات", hint: "تحتاج متابعة اليوم", icon: ShieldCheck, tone: "orange", progress: liveSummary ? Math.min(100, liveSummary.openActions * 4) : 0 },
               { label: "الزيارات المجدولة", value: liveSummary ? String(liveSummary.upcomingVisits) : "—", change: liveSummary ? "قادمة" : "بانتظار البيانات", hint: "من خطة المتابعة", icon: ClipboardCheck, tone: "blue", progress: liveSummary ? Math.min(100, liveSummary.upcomingVisits * 10) : 0 },
               { label: "وثائق تحتاج انتباه", value: liveSummary ? String(liveSummary.expiringDocuments).padStart(2, "0") : "—", change: liveSummary ? "تنبيه مبكر" : "بانتظار البيانات", hint: "تراخيص وعقود", icon: FileText, tone: "purple", progress: liveSummary ? Math.min(100, liveSummary.expiringDocuments * 12) : 0 },
-            ].map((item) => { const Icon = item.icon; return <Card key={item.label} onClick={() => setActiveNav(item.label === "مؤشر صحة الفروع" ? "الفروع" : item.label === "إجراءات مفتوحة" ? "الإجراءات والتحسين" : item.label === "الزيارات المجدولة" ? "الزيارات والفحص" : "الوثائق والتراخيص")} className="cursor-pointer border-[#e2e9e2] bg-white shadow-[0_5px_18px_rgba(39,70,48,0.04)] transition hover:-translate-y-0.5 hover:shadow-md"><CardContent className="p-5"><div className="flex items-start justify-between"><div className={`flex h-10 w-10 items-center justify-center rounded-xl ${item.tone === "green" ? "bg-[#e2f3e7] text-[#2c8a5f]" : item.tone === "orange" ? "bg-[#fff0dc] text-[#c47629]" : item.tone === "blue" ? "bg-[#e5f0fa] text-[#4d83b0]" : "bg-[#eee9fa] text-[#7658a9]"}`}><Icon className="h-5 w-5" /></div><button className="text-[#acb6ad] hover:text-[#637066]"><MoreHorizontal className="h-5 w-5" /></button></div><p className="mt-4 text-xs font-medium text-[#7b877d]">{item.label}</p><div className="mt-1 flex items-end justify-between gap-2"><p className="text-[25px] font-bold tracking-tight text-[#1c2820]">{item.value}</p><span className={`mb-1 text-[11px] font-bold ${item.tone === "orange" || item.tone === "purple" ? "text-[#c47629]" : "text-[#39865d]"}`}>{item.change}</span></div><Progress value={item.progress} className="mt-4 h-1.5 bg-[#eef2ee]" /><p className="mt-2 text-[11px] text-[#99a39a]">{item.hint}</p></CardContent></Card> })}
+            ].map((item) => { const Icon = item.icon; return <Card key={item.label} onClick={() => setActiveNav(item.label === "الفروع النشطة" || item.label === "المندوبون والمستودعات" ? "الفروع" : item.label === "إجراءات مفتوحة" ? "الإجراءات والتحسين" : item.label === "الزيارات المجدولة" ? "الزيارات والفحص" : "الوثائق والتراخيص")} className="cursor-pointer border-[#e2e9e2] bg-white shadow-[0_5px_18px_rgba(39,70,48,0.04)] transition hover:-translate-y-0.5 hover:shadow-md"><CardContent className="p-5"><div className="flex items-start justify-between"><div className={`flex h-10 w-10 items-center justify-center rounded-xl ${item.tone === "green" ? "bg-[#e2f3e7] text-[#2c8a5f]" : item.tone === "orange" ? "bg-[#fff0dc] text-[#c47629]" : item.tone === "blue" ? "bg-[#e5f0fa] text-[#4d83b0]" : "bg-[#eee9fa] text-[#7658a9]"}`}><Icon className="h-5 w-5" /></div><button className="text-[#acb6ad] hover:text-[#637066]"><MoreHorizontal className="h-5 w-5" /></button></div><p className="mt-4 text-xs font-medium text-[#7b877d]">{item.label}</p><div className="mt-1 flex items-end justify-between gap-2"><p className="text-[25px] font-bold tracking-tight text-[#1c2820]">{item.value}</p><span className={`mb-1 text-[11px] font-bold ${item.tone === "orange" || item.tone === "purple" ? "text-[#c47629]" : "text-[#39865d]"}`}>{item.change}</span></div><Progress value={item.progress} className="mt-4 h-1.5 bg-[#eef2ee]" /><p className="mt-2 text-[11px] text-[#99a39a]">{item.hint}</p></CardContent></Card> })}
           </section>
 
           <section className="grid gap-5 xl:grid-cols-[1.45fr_0.9fr]">

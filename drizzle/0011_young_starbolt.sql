@@ -1,0 +1,1 @@
+ALTER TABLE `branches` ADD `operationalType` enum('branch','representative','warehouse') DEFAULT 'branch' NOT NULL;

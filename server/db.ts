@@ -120,11 +120,11 @@ export async function getOperationsOverview(user: Pick<User, "id" | "role" | "re
 
 export async function getDashboardSummary(user: Pick<User, "id" | "role" | "regionId" | "branchId">) {
   const db = await getDb();
-  if (!db) return { branches: [], openActions: 0, upcomingVisits: 0, expiringDocuments: 0, openMaintenance: 0, tasks: [], alerts: [] };
+  if (!db) return { branches: [], activeBranchesCount: 0, inactiveBranchesCount: 0, representativesCount: 0, warehousesCount: 0, openActions: 0, upcomingVisits: 0, expiringDocuments: 0, openMaintenance: 0, tasks: [], alerts: [] };
   const allBranches = await db.select().from(branches).orderBy(desc(branches.healthScore));
   const visibleBranches = user.role === "admin" ? allBranches : allBranches.filter((branch) => user.branchId ? branch.id === user.branchId : user.regionId ? branch.regionId === user.regionId : false);
   const branchIds = visibleBranches.map((branch) => branch.id);
-  if (!branchIds.length && user.role !== "admin") return { branches: [], openActions: 0, upcomingVisits: 0, expiringDocuments: 0, openMaintenance: 0, tasks: [], alerts: [] };
+  if (!branchIds.length && user.role !== "admin") return { branches: [], activeBranchesCount: 0, inactiveBranchesCount: 0, representativesCount: 0, warehousesCount: 0, openActions: 0, upcomingVisits: 0, expiringDocuments: 0, openMaintenance: 0, tasks: [], alerts: [] };
   const scope = user.role === "admin" ? undefined : inArray(correctiveActions.branchId, branchIds);
   const [branchRows, actionRows, visitRows, documentRows, maintenanceRows, taskRows] = await Promise.all([
     Promise.resolve(visibleBranches),
@@ -141,8 +141,16 @@ export async function getDashboardSummary(user: Pick<User, "id" | "role" | "regi
     ...visitRows.slice(0, 5).map((row) => ({ id: `visit-${row.id}`, kind: "visit" as const, branchId: row.branchId, title: "زيارة ميدانية مجدولة", detail: `${branchName.get(row.branchId) ?? "فرع غير محدد"} · ${row.scheduledAt ? new Date(row.scheduledAt).toLocaleDateString("ar-SA") : "موعد غير محدد"}`, tone: "blue" as const })),
     ...actionRows.filter((row) => row.status === "open").slice(0, 5).map((row) => ({ id: `action-${row.id}`, kind: "action" as const, branchId: row.branchId, title: row.title, detail: `${branchName.get(row.branchId) ?? "فرع غير محدد"} · إجراء مفتوح`, tone: "orange" as const })),
   ];
+  const activeBranchesCount = visibleBranches.filter((branch) => branch.operationalType === "branch" && branch.status === "active").length;
+  const inactiveBranchesCount = visibleBranches.filter((branch) => branch.operationalType === "branch" && branch.status !== "active").length;
+  const representativesCount = visibleBranches.filter((branch) => branch.operationalType === "representative").length;
+  const warehousesCount = visibleBranches.filter((branch) => branch.operationalType === "warehouse").length;
   return {
     branches: branchRows,
+    activeBranchesCount,
+    inactiveBranchesCount,
+    representativesCount,
+    warehousesCount,
     openActions: actionRows.length,
     upcomingVisits: visitRows.length,
     expiringDocuments: documentRows.length,

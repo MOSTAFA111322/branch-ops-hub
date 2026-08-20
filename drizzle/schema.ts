@@ -25,6 +25,7 @@ export const branches = mysqlTable("branches", {
   id: int("id").autoincrement().primaryKey(),
   code: varchar("code", { length: 32 }).notNull().unique(),
   regionId: int("regionId"),
+  operationalType: mysqlEnum("operationalType", ["branch", "representative", "warehouse"]).default("branch").notNull(),
   name: varchar("name", { length: 160 }).notNull(),
   region: varchar("region", { length: 120 }).notNull(),
   city: varchar("city", { length: 120 }).notNull(),

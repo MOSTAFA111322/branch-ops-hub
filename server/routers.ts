@@ -81,6 +81,7 @@ export const appRouter = router({
       code: z.string().min(1).max(32),
       name: z.string().min(1).max(160),
       regionId: z.number().int().positive(),
+      operationalType: z.enum(["branch", "representative", "warehouse"]).default("branch"),
       region: z.string().min(1).max(120),
       city: z.string().min(1).max(120),
       managerName: z.string().max(160).optional(),
@@ -113,6 +114,7 @@ export const appRouter = router({
       address: z.string().max(2000).nullable().optional(),
       phone: z.string().max(32).nullable().optional(),
       status: z.enum(["active", "paused", "closed"]).optional(),
+      operationalType: z.enum(["branch", "representative", "warehouse"]).optional(),
     })).mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new Error("Database unavailable");

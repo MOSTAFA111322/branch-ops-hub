@@ -78,6 +78,13 @@
       "when": 1787037307539,
       "tag": "0010_perpetual_freak",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "5",
+      "when": 1787184256045,
+      "tag": "0011_young_starbolt",
+      "breakpoints": true
     }
   ]
 }
