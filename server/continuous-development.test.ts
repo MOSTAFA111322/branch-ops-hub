@@ -29,6 +29,13 @@ describe("continuous development pack wiring", () => {
     expect(home).toContain("usageSurface");
   });
 
+  it("keeps operational Excel export tied to the selected period and region", () => {
+    expect(home).toContain("downloadOperationalComparisonExcel");
+    expect(home).toContain("تقرير-المقارنة-التشغيلية.xlsx");
+    expect(home).toContain("executiveRegionId");
+    expect(home).toContain("الاتجاه المالي");
+  });
+
   it("renders accessible health and operational empty/loading states", () => {
     expect(scheduledView).toContain('aria-labelledby="scheduled-health-title"');
     expect(scheduledView).toContain("تنبيه مبكر للمراجعة");
