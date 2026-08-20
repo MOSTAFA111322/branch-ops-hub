@@ -260,4 +260,33 @@ export type Region = typeof regions.$inferSelect;
 export type Branch = typeof branches.$inferSelect;
 export type Visit = typeof visits.$inferSelect;
 export type BranchFinancialSnapshot = typeof branchFinancialSnapshots.$inferSelect;
+export const notifications = mysqlTable("notifications", {
+  id: int("id").autoincrement().primaryKey(),
+  recipientId: int("recipientId").notNull(),
+  kind: varchar("kind", { length: 80 }).notNull(),
+  title: varchar("title", { length: 220 }).notNull(),
+  content: text("content").notNull(),
+  entityType: varchar("entityType", { length: 80 }),
+  entityId: int("entityId"),
+  readAt: timestamp("readAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export const reportApprovals = mysqlTable("reportApprovals", {
+  id: int("id").autoincrement().primaryKey(),
+  periodYear: int("periodYear").notNull(),
+  periodMonth: int("periodMonth").notNull(),
+  approverId: int("approverId").notNull(),
+  status: mysqlEnum("status", ["pending", "approved", "rejected"]).default("pending").notNull(),
+  signatureText: varchar("signatureText", { length: 220 }),
+  notes: text("notes"),
+  signedAt: timestamp("signedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => ({
+  periodApproverUnique: uniqueIndex("report_approval_period_approver_unique").on(table.periodYear, table.periodMonth, table.approverId),
+}));
+
 export type CorrectiveAction = typeof correctiveActions.$inferSelect;
+export type Notification = typeof notifications.$inferSelect;
+export type ReportApproval = typeof reportApprovals.$inferSelect;
