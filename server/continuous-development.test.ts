@@ -36,6 +36,17 @@ describe("continuous development pack wiring", () => {
     expect(home).toContain("الاتجاه المالي");
   });
 
+  it("exposes temporal operational comparison for quality and maintenance", () => {
+    const db = readFileSync(new URL("./db.ts", import.meta.url), "utf8");
+    expect(db).toContain("previousOperationalSummary");
+    expect(db).toContain("operationalComparison");
+    expect(db).toContain("qualityOpen");
+    expect(db).toContain("maintenanceOpen");
+    expect(home).toContain("التغير مقابل الفترة السابقة");
+    expect(home).toContain("الحالي");
+    expect(home).toContain("السابق");
+  });
+
   it("renders accessible health and operational empty/loading states", () => {
     expect(scheduledView).toContain('aria-labelledby="scheduled-health-title"');
     expect(scheduledView).toContain("تنبيه مبكر للمراجعة");
@@ -53,5 +64,16 @@ describe("continuous development pack wiring", () => {
     expect(scheduledView).toContain("warningLatencyMs");
     expect(scheduledView).toContain("healthRefreshSeconds");
     expect(scheduledView).toContain("scheduled-report-settings");
+  });
+
+  it("wires scheduled report recipients to protected admin contracts", () => {
+    expect(routers).toContain("scheduledReportRecipients");
+    expect(routers).toContain("saveRecipients");
+    expect(routers).toContain("recipients_updated");
+    expect(scheduled).toContain("resolveReportRecipients");
+    expect(scheduled).toContain("notifyReportRecipients");
+    expect(scheduled).toContain('kind: "scheduled_report"');
+    expect(scheduledView).toContain("مستلمو التقارير المجدولة");
+    expect(scheduledView).toContain("حفظ المستلمين");
   });
 });

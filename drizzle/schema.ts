@@ -21,6 +21,14 @@ export const dashboardPreferences = mysqlTable("dashboardPreferences", {
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 
+export const scheduledReportRecipients = mysqlTable("scheduledReportRecipients", {
+  id: int("id").autoincrement().primaryKey(),
+  taskUid: varchar("taskUid", { length: 120 }).notNull(),
+  recipientId: int("recipientId").notNull(),
+  createdById: int("createdById").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => ({ uniqueRecipient: uniqueIndex("scheduledReportRecipients_task_recipient_unique").on(table.taskUid, table.recipientId) }));
+
 export const regions = mysqlTable("regions", {
   id: int("id").autoincrement().primaryKey(),
   name: varchar("name", { length: 120 }).notNull().unique(),

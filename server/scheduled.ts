@@ -3,9 +3,20 @@ import { eq, inArray } from "drizzle-orm";
 import { getDb } from "./db";
 import { sdk } from "./_core/sdk";
 import { notifyOwner } from "./_core/notification";
-import { auditLogs, branchFinancialSnapshots, branches, users } from "../drizzle/schema";
+import { auditLogs, branchFinancialSnapshots, branches, users, scheduledReportRecipients, notifications } from "../drizzle/schema";
 
 export const MONTHLY_REPORT_RECIPIENT_ROLES = ["admin", "area_manager", "quality"] as const;
+
+async function resolveReportRecipients(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, taskUid: string, fallbackRoles: readonly string[]) {
+  const configured = await db.select({ id: users.id, name: users.name, email: users.email, role: users.role }).from(scheduledReportRecipients).innerJoin(users, eq(users.id, scheduledReportRecipients.recipientId)).where(eq(scheduledReportRecipients.taskUid, taskUid));
+  const rows = configured.length ? configured : await db.select({ id: users.id, name: users.name, email: users.email, role: users.role }).from(users).where(inArray(users.role, fallbackRoles as any));
+  return rows.map((recipient) => ({ id: recipient.id, name: recipient.name ?? recipient.email ?? `مستخدم ${recipient.id}`, email: recipient.email, role: recipient.role }));
+}
+
+async function notifyReportRecipients(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, recipients: Array<{ id: number }>, title: string, content: string) {
+  if (!recipients.length) return;
+  await db.insert(notifications).values(recipients.map((recipient) => ({ recipientId: recipient.id, kind: "scheduled_report", title, content, entityType: "scheduled_report" })));
+}
 
 export async function monthlyFinancialReportHandler(req: Request, res: Response) {
   const context = { url: req.originalUrl, timestamp: new Date().toISOString() };
@@ -29,8 +40,7 @@ export async function monthlyFinancialReportHandler(req: Request, res: Response)
     const auditRows = await db.select({ afterData: auditLogs.afterData }).from(auditLogs).where(eq(auditLogs.action, "scheduled_report"));
     if (auditRows.some(row => row.afterData?.includes(marker))) return res.json({ ok: true, skipped: "already-sent", marker });
 
-    const recipientRows = await db.select({ id: users.id, name: users.name, email: users.email, role: users.role }).from(users).where(inArray(users.role, MONTHLY_REPORT_RECIPIENT_ROLES));
-    const recipients = recipientRows.map((recipient) => ({ id: recipient.id, name: recipient.name ?? recipient.email ?? `مستخدم ${recipient.id}`, email: recipient.email, role: recipient.role }));
+    const recipients = await resolveReportRecipients(db, user.taskUid, MONTHLY_REPORT_RECIPIENT_ROLES);
     const rows = await db.select({ branchId: branchFinancialSnapshots.branchId, branchName: branches.name, revenue: branchFinancialSnapshots.revenue, netProfit: branchFinancialSnapshots.netProfit }).from(branchFinancialSnapshots).leftJoin(branches, eq(branches.id, branchFinancialSnapshots.branchId));
     const periodRows = rows.filter(row => row.revenue !== null);
     const totalRevenue = periodRows.reduce((sum, row) => sum + Number(row.revenue ?? 0), 0);
@@ -38,6 +48,7 @@ export async function monthlyFinancialReportHandler(req: Request, res: Response)
     const recipientLabel = recipients.length > 0 ? recipients.map((recipient) => `${recipient.name} (${recipient.role})`).join("، ") : "لا يوجد مسؤولون إداريون مسجلون";
     const content = `المستلمون الإداريون: ${recipientLabel}\nالفترة: ${year}-${String(month).padStart(2, "0")}\nعدد الفروع المسجلة: ${periodRows.length}\nإجمالي الإيرادات: ${totalRevenue.toFixed(2)}\nإجمالي صافي الربح: ${totalProfit.toFixed(2)}`;
     const delivered = await notifyOwner({ title: "التقرير المالي الشهري للفروع", content });
+    await notifyReportRecipients(db, recipients, "التقرير المالي الشهري للفروع", content);
     await db.insert(auditLogs).values({ actorId: user.id, entityType: "scheduled_report", action: "scheduled_report", afterData: JSON.stringify({ marker, delivered, taskUid: user.taskUid, latencyMs: Date.now() - startedAt, recipientIds: recipients.map((recipient) => recipient.id), recipientRoles: recipients.map((recipient) => recipient.role) }) });
     return res.json({ ok: true, delivered, marker });
   } catch (error) {
@@ -74,8 +85,10 @@ export async function commandUsageDigestHandler(req: Request, res: Response) {
     rows.filter(row => row.createdAt >= since).forEach(row => { try { const command = JSON.parse(row.afterData ?? "{}").command ?? "غير محدد"; counts.set(command, (counts.get(command) ?? 0) + 1); } catch { counts.set("غير محدد", (counts.get("غير محدد") ?? 0) + 1); } });
     const top = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 10);
     const content = `الفترة: آخر 30 يومًا\nإجمالي الاستخدامات: ${rows.filter(row => row.createdAt >= since).length}\nالأوامر الأكثر استعمالًا: ${top.map(([command, count]) => `${command} (${count})`).join("، ") || "لا توجد بيانات"}`;
+    const recipients = await resolveReportRecipients(db, user.taskUid, ["admin", "area_manager"]);
     const delivered = await notifyOwner({ title: "ملخص استخدام أوامر مركز التشغيل", content });
-    await db.insert(auditLogs).values({ actorId: user.id, entityType: "scheduled_report", action: "usage_digest", afterData: JSON.stringify({ marker, delivered, taskUid: user.taskUid, latencyMs: Date.now() - startedAt, top }) });
+    await notifyReportRecipients(db, recipients, "ملخص استخدام أوامر مركز التشغيل", content);
+    await db.insert(auditLogs).values({ actorId: user.id, entityType: "scheduled_report", action: "usage_digest", afterData: JSON.stringify({ marker, delivered, taskUid: user.taskUid, latencyMs: Date.now() - startedAt, recipientIds: recipients.map((recipient) => recipient.id), top }) });
     return res.json({ ok: true, delivered, marker, top });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

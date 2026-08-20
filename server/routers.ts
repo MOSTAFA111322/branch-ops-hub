@@ -8,7 +8,7 @@ import { and, eq, inArray, isNull } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { getBranchById, getBranchProfile, getDashboardSummary, getOperationsOverview, listBranches, getDb } from "./db";
 import { retryCommandUsageDigest } from "./scheduled";
-import { branches, regions, branchAssets, branchFinancialSnapshots, checklistItems, checklistTemplates, correctiveActions, dashboardPreferences, documentVersions, documents, internalRequests, maintenanceTickets, qualityCases, tasks, users, visitChecklistResults, visits, auditLogs, notifications, reportApprovals } from "../drizzle/schema";
+import { branches, regions, branchAssets, branchFinancialSnapshots, checklistItems, checklistTemplates, correctiveActions, dashboardPreferences, documentVersions, documents, internalRequests, maintenanceTickets, qualityCases, tasks, users, visitChecklistResults, visits, auditLogs, notifications, reportApprovals, scheduledReportRecipients } from "../drizzle/schema";
 
 async function recordAudit(db: any, input: { actorId?: number; branchId?: number; entityType: string; entityId?: number; action: string; beforeData?: unknown; afterData?: unknown }) {
   await db.insert(auditLogs).values({
@@ -58,6 +58,25 @@ export const appRouter = router({
       const status = latestLog && failureLogs.includes(latestLog) ? "failed" : hoursSinceLastRun !== null && hoursSinceLastRun > 192 ? "stale" : warningReasons.length ? "warning" : "healthy";
       const health = { status, warningReasons, hoursSinceLastRun, lastSuccessAt: successLogs[0]?.createdAt ?? null, lastFailureAt: failureLogs[0]?.createdAt ?? null, successCount: successLogs.length, failureCount: failureLogs.length, successRate, averageLatencyMs } as const;
       return { jobs: result.jobs, total: result.total, logs: orderedLogs, health };
+    }),
+    recipients: roleProcedure(["admin", "area_manager"]).query(async () => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      const rows = await db.select().from(scheduledReportRecipients).limit(500);
+      const recipientUsers = await db.select({ id: users.id, name: users.name, email: users.email, role: users.role }).from(users).limit(200);
+      return { rows, users: recipientUsers };
+    }),
+    saveRecipients: roleProcedure(["admin", "area_manager"]).input(z.object({ taskUid: z.string().min(1).max(120), recipientIds: z.array(z.number().int().positive()).max(50) })).mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      const jobs = await listHeartbeatJobs("");
+      if (!jobs.jobs.some((job) => job.taskUid === input.taskUid)) throw new TRPCError({ code: "NOT_FOUND", message: "وظيفة التقرير غير موجودة" });
+      const validUsers = await db.select({ id: users.id }).from(users).where(inArray(users.id, input.recipientIds));
+      const validIds = validUsers.map((user) => user.id);
+      await db.delete(scheduledReportRecipients).where(eq(scheduledReportRecipients.taskUid, input.taskUid));
+      if (validIds.length) await db.insert(scheduledReportRecipients).values(validIds.map((recipientId) => ({ taskUid: input.taskUid, recipientId, createdById: ctx.user.id })));
+      await recordAudit(db, { actorId: ctx.user.id, entityType: "scheduled_report", action: "recipients_updated", afterData: { taskUid: input.taskUid, recipientIds: validIds } });
+      return { success: true, count: validIds.length };
     }),
     setEnabled: roleProcedure(["admin"]).input(z.object({ taskUid: z.string().min(1).max(120), enabled: z.boolean() })).mutation(async ({ ctx, input }) => {
       const result = await updateHeartbeatJob(input.taskUid, { enable: input.enabled }, "");

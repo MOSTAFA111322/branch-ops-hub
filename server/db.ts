@@ -1,4 +1,4 @@
-import { desc, eq, inArray, gte } from "drizzle-orm";
+import { and, desc, eq, inArray, gte, lt } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { branches, branchAssets, branchContracts, branchEmployees, branchEvents, branchInventory, branchFinancialSnapshots, correctiveActions, documents, internalRequests, maintenanceTickets, qualityCases, tasks, users, visits, InsertUser, User } from "../drizzle/schema";
 import { ENV } from "./_core/env";
@@ -94,13 +94,17 @@ export async function getOperationsOverview(user: Pick<User, "id" | "role" | "re
   const visible = (await listBranches(user)).filter((branch) => !regionId || branch.regionId === regionId);
   const ids = visible.map((branch) => branch.id);
   if (user.role !== "admin" && !ids.length) return { visits: [], actions: [], documents: [], qualityCases: [], maintenanceTickets: [], requests: [], tasks: [], qualityAnalysis: [], operationalSummary: null };
-  const since = new Date(Date.now() - (period === "day" ? 86400000 : period === "week" ? 604800000 : 2592000000));
-  const filterRows = async <T extends { branchId: number | null; createdAt?: Date | null }>(table: any) => {
-    const rows = await db.select().from(table).where(gte(table.createdAt, since)).limit(100) as T[];
+  const periodMs = period === "day" ? 86400000 : period === "week" ? 604800000 : 2592000000;
+  const since = new Date(Date.now() - periodMs);
+  const previousSince = new Date(since.getTime() - periodMs);
+  const filterRows = async <T extends { branchId: number | null; createdAt?: Date | null }>(table: any, from: Date, to?: Date) => {
+    const dateFilter = to ? and(gte(table.createdAt, from), lt(table.createdAt, to)) : gte(table.createdAt, from);
+    const rows = await db.select().from(table).where(dateFilter).limit(100) as T[];
     return user.role === "admin" ? rows : rows.filter((row) => row.branchId == null || ids.includes(row.branchId));
   };
-  const [visitsRows, actionRows, documentRows, qualityRows, maintenanceRows, requestRows, taskRows, financialRows] = await Promise.all([
-    filterRows(visits), filterRows(correctiveActions), filterRows(documents), filterRows(qualityCases), filterRows(maintenanceTickets), filterRows(internalRequests), filterRows(tasks),
+  const [visitsRows, actionRows, documentRows, qualityRows, maintenanceRows, requestRows, taskRows, previousQualityRows, previousMaintenanceRows, financialRows] = await Promise.all([
+    filterRows(visits, since), filterRows(correctiveActions, since), filterRows(documents, since), filterRows(qualityCases, since), filterRows(maintenanceTickets, since), filterRows(internalRequests, since), filterRows(tasks, since),
+    filterRows(qualityCases, previousSince, since), filterRows(maintenanceTickets, previousSince, since),
     db.select().from(branchFinancialSnapshots).orderBy(desc(branchFinancialSnapshots.periodYear), desc(branchFinancialSnapshots.periodMonth)).limit(240),
   ]);
   const scopedTasks = user.role === "admin" ? taskRows : taskRows.filter((row: any) => row.assigneeId === user.id);
@@ -115,21 +119,32 @@ export async function getOperationsOverview(user: Pick<User, "id" | "role" | "re
     qualityCounts.set(cause, current);
   }
   const qualityAnalysis = Array.from(qualityCounts.values()).sort((a, b) => b.count - a.count || b.open - a.open);
-  const operationalSummary = {
+  const summarizeOperations = (qualityInput: any[], maintenanceInput: any[]) => ({
     quality: {
-      total: qualityRows.length,
-      open: qualityRows.filter((row: any) => !["closed", "resolved"].includes(row.status)).length,
-      critical: qualityRows.filter((row: any) => row.severity === "critical").length,
-      high: qualityRows.filter((row: any) => row.severity === "high").length,
+      total: qualityInput.length,
+      open: qualityInput.filter((row: any) => !["closed", "resolved"].includes(row.status)).length,
+      critical: qualityInput.filter((row: any) => row.severity === "critical").length,
+      high: qualityInput.filter((row: any) => row.severity === "high").length,
     },
     maintenance: {
-      total: maintenanceRows.length,
-      open: maintenanceRows.filter((row: any) => !["closed", "resolved"].includes(row.status)).length,
-      urgent: maintenanceRows.filter((row: any) => row.priority === "urgent").length,
-      breakdowns: maintenanceRows.filter((row: any) => row.ticketType === "breakdown").length,
-      preventive: maintenanceRows.filter((row: any) => row.ticketType === "preventive").length,
+      total: maintenanceInput.length,
+      open: maintenanceInput.filter((row: any) => !["closed", "resolved"].includes(row.status)).length,
+      urgent: maintenanceInput.filter((row: any) => row.priority === "urgent").length,
+      breakdowns: maintenanceInput.filter((row: any) => row.ticketType === "breakdown").length,
+      preventive: maintenanceInput.filter((row: any) => row.ticketType === "preventive").length,
     },
-    period,
+  });
+  const operationalSummary = { ...summarizeOperations(qualityRows, maintenanceRows), period };
+  const previousOperationalSummary = { ...summarizeOperations(previousQualityRows, previousMaintenanceRows), period };
+  const operationalComparison = {
+    current: operationalSummary,
+    previous: previousOperationalSummary,
+    delta: {
+      qualityTotal: operationalSummary.quality.total - previousOperationalSummary.quality.total,
+      qualityOpen: operationalSummary.quality.open - previousOperationalSummary.quality.open,
+      maintenanceTotal: operationalSummary.maintenance.total - previousOperationalSummary.maintenance.total,
+      maintenanceOpen: operationalSummary.maintenance.open - previousOperationalSummary.maintenance.open,
+    },
   };
   const comparison = visible.map((branch, index) => ({ id: branch.id, name: branch.name, city: branch.city, healthScore: branch.healthScore, openActions: branch.openActions, riskLevel: Number(branch.healthScore) < 75 ? "مرتفع" : Number(branch.healthScore) < 85 ? "متوسط" : "مستقر", activityCount: activityRows.filter((row) => row.branchId === branch.id).length, period, rank: index + 1 }));
   const visibleFinancialRows = (user.role === "admin" ? financialRows : financialRows.filter((row) => ids.includes(row.branchId))) as Array<{ branchId: number; periodYear: number; periodMonth: number; revenue: string | number; netProfit: string | number }>;
@@ -143,7 +158,7 @@ export async function getOperationsOverview(user: Pick<User, "id" | "role" | "re
     trendMap.set(key, current);
   }
   const financialTrend = Array.from(trendMap.values()).sort((a, b) => a.period.localeCompare(b.period)).slice(-12);
-  return { comparison, financialTrend, visits: visitsRows, actions: actionRows, documents: documentRows, qualityCases: qualityRows, qualityAnalysis, operationalSummary, maintenanceTickets: maintenanceRows, requests: scopedRequests, tasks: scopedTasks, tasksAndRequests: [...scopedTasks, ...scopedRequests] };
+  return { comparison, financialTrend, visits: visitsRows, actions: actionRows, documents: documentRows, qualityCases: qualityRows, qualityAnalysis, operationalSummary, previousOperationalSummary, operationalComparison, maintenanceTickets: maintenanceRows, requests: scopedRequests, tasks: scopedTasks, tasksAndRequests: [...scopedTasks, ...scopedRequests] };
 }
 
 export async function getDashboardSummary(user: Pick<User, "id" | "role" | "regionId" | "branchId">) {
