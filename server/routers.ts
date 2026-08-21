@@ -225,14 +225,14 @@ export const appRouter = router({
       const rows = await db.select().from(branchFinancialSnapshots).where(inArray(branchFinancialSnapshots.branchId, input?.branchId ? [input.branchId].filter(id => allowedIds.includes(id)) : allowedIds));
       return rows.filter(row => (input?.year === undefined || row.periodYear === input.year) && (input?.month === undefined || row.periodMonth === input.month));
     }),
-    upsert: roleProcedure(["admin", "area_manager", "branch_manager"]).input(z.object({ branchId: z.number().int().positive(), year: z.number().int().min(2000).max(2200), month: z.number().int().min(1).max(12), revenue: z.number().min(0), costOfGoods: z.number().min(0), operatingExpenses: z.number().min(0), notes: z.string().max(2000).optional() })).mutation(async ({ input, ctx }) => {
+    upsert: roleProcedure(["admin", "area_manager", "branch_manager"]).input(z.object({ branchId: z.number().int().positive(), year: z.number().int().min(2000).max(2200), month: z.number().int().min(1).max(12), revenue: z.number().min(0), salesReturns: z.number().min(0).default(0), costOfGoods: z.number().min(0), costReturns: z.number().min(0).default(0), operatingExpenses: z.number().min(0), notes: z.string().max(2000).optional() })).mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new Error("Database unavailable");
       const allowedIds = (await listBranches(ctx.user)).map(branch => branch.id);
       if (!allowedIds.includes(input.branchId)) throw new TRPCError({ code: "FORBIDDEN", message: "لا تملك صلاحية هذا الفرع" });
       const existing = await db.select().from(branchFinancialSnapshots).where(eq(branchFinancialSnapshots.branchId, input.branchId));
       const match = existing.find(row => row.periodYear === input.year && row.periodMonth === input.month);
-      const values = { branchId: input.branchId, periodYear: input.year, periodMonth: input.month, revenue: input.revenue.toFixed(2), costOfGoods: input.costOfGoods.toFixed(2), operatingExpenses: input.operatingExpenses.toFixed(2), netProfit: (input.revenue - input.costOfGoods - input.operatingExpenses).toFixed(2), notes: input.notes, source: "manual" as const, createdBy: ctx.user.id };
+      const netSales = input.revenue - input.salesReturns; const netCost = input.costOfGoods - input.costReturns; const netProfitMargin = netSales - netCost; const values = { branchId: input.branchId, periodYear: input.year, periodMonth: input.month, revenue: input.revenue.toFixed(2), salesReturns: input.salesReturns.toFixed(2), netSales: netSales.toFixed(2), costOfGoods: input.costOfGoods.toFixed(2), costReturns: input.costReturns.toFixed(2), netCost: netCost.toFixed(2), netProfitMargin: netProfitMargin.toFixed(2), operatingExpenses: input.operatingExpenses.toFixed(2), netProfit: (netProfitMargin - input.operatingExpenses).toFixed(2), notes: input.notes, source: "manual" as const, createdBy: ctx.user.id };
       if (match) {
         await db.update(branchFinancialSnapshots).set({ ...values, createdBy: match.createdBy ?? ctx.user.id }).where(eq(branchFinancialSnapshots.id, match.id));
         await recordAudit(db, { actorId: ctx.user.id, branchId: input.branchId, entityType: "financial_snapshot", entityId: match.id, action: "update", beforeData: match, afterData: values });
