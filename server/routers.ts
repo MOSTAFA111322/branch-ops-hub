@@ -8,7 +8,7 @@ import { and, eq, inArray, isNull } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { getBranchById, getBranchProfile, getDashboardSummary, getOperationsOverview, listBranches, getDb } from "./db";
 import { retryCommandUsageDigest, retryScheduledReportDelivery } from "./scheduled";
-import { branches, regions, branchAssets, branchFinancialSnapshots, checklistItems, checklistTemplates, correctiveActions, dashboardPreferences, documentVersions, documents, internalRequests, maintenanceTickets, qualityCases, tasks, users, visitChecklistResults, visits, auditLogs, notifications, reportApprovals, scheduledReportRecipients, scheduledReportDeliveries } from "../drizzle/schema";
+import { branches, regions, branchAssets, branchFinancialSnapshots, checklistItems, checklistTemplates, correctiveActions, dashboardPreferences, documentVersions, documents, internalRequests, maintenanceTickets, qualityCases, tasks, users, visitChecklistResults, visits, auditLogs, notifications, reportApprovals, scheduledReportRecipients, scheduledReportDeliveries, costCenterMappings } from "../drizzle/schema";
 
 async function recordAudit(db: any, input: { actorId?: number; branchId?: number; entityType: string; entityId?: number; action: string; beforeData?: unknown; afterData?: unknown }) {
   await db.insert(auditLogs).values({
@@ -215,6 +215,22 @@ export const appRouter = router({
       return { id, ...changes };
     }),
   }),
+  costCenters: router({
+    list: roleProcedure(["admin", "area_manager"]).query(async ({ ctx }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      return db.select().from(costCenterMappings).where(eq(costCenterMappings.isActive, true));
+    }),
+    upsert: roleProcedure(["admin"]).input(z.object({
+      id: z.number().int().positive().optional(), sourceCode: z.string().min(1).max(80), sourceName: z.string().min(1).max(180), branchId: z.number().int().positive().nullable().optional(), centerType: z.enum(["branch", "warehouse", "headquarters", "representative"]), isSalesCenter: z.boolean(), notes: z.string().max(2000).nullable().optional(),
+    })).mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      const values = { ...input, createdBy: ctx.user.id };
+      if (input.id) { await db.update(costCenterMappings).set(values).where(eq(costCenterMappings.id, input.id)); return { id: input.id, updated: true }; }
+      const inserted = await db.insert(costCenterMappings).values(values); return { id: Number(inserted[0].insertId), updated: false };
+    }),
+  }),
   financials: router({
     list: protectedProcedure.input(z.object({ branchId: z.number().int().positive().optional(), year: z.number().int().min(2000).max(2200).optional(), month: z.number().int().min(1).max(12).optional() }).optional()).query(async ({ input, ctx }) => {
       const db = await getDb();
@@ -224,6 +240,16 @@ export const appRouter = router({
       if (!allowedIds.length) return [];
       const rows = await db.select().from(branchFinancialSnapshots).where(inArray(branchFinancialSnapshots.branchId, input?.branchId ? [input.branchId].filter(id => allowedIds.includes(id)) : allowedIds));
       return rows.filter(row => (input?.year === undefined || row.periodYear === input.year) && (input?.month === undefined || row.periodMonth === input.month));
+    }),
+    expenseSummary: roleProcedure(["admin", "area_manager", "branch_manager"]).input(z.object({ year: z.number().int().min(2000).max(2200), month: z.number().int().min(1).max(12) })).query(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      const visibleBranches = await listBranches(ctx.user);
+      const rows = await db.select().from(branchFinancialSnapshots).where(inArray(branchFinancialSnapshots.branchId, visibleBranches.map(branch => branch.id)));
+      return visibleBranches.map(branch => {
+        const snapshot = rows.find(row => row.branchId === branch.id && row.periodYear === input.year && row.periodMonth === input.month);
+        return { branchId: branch.id, branchName: branch.name, operationalType: branch.operationalType, salesCenter: branch.operationalType === "branch", netSales: Number(snapshot?.netSales ?? snapshot?.revenue ?? 0), netCost: Number(snapshot?.netCost ?? snapshot?.costOfGoods ?? 0), netProfitMargin: Number(snapshot?.netProfitMargin ?? 0), operatingExpenses: Number(snapshot?.operatingExpenses ?? 0), netProfit: Number(snapshot?.netProfit ?? 0) };
+      });
     }),
     upsert: roleProcedure(["admin", "area_manager", "branch_manager"]).input(z.object({ branchId: z.number().int().positive(), year: z.number().int().min(2000).max(2200), month: z.number().int().min(1).max(12), revenue: z.number().min(0), salesReturns: z.number().min(0).default(0), costOfGoods: z.number().min(0), costReturns: z.number().min(0).default(0), operatingExpenses: z.number().min(0), notes: z.string().max(2000).optional() })).mutation(async ({ input, ctx }) => {
       const db = await getDb();

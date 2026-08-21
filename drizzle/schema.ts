@@ -66,6 +66,20 @@ export const branches = mysqlTable("branches", {
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 
+export const costCenterMappings = mysqlTable("costCenterMappings", {
+  id: int("id").autoincrement().primaryKey(),
+  sourceCode: varchar("sourceCode", { length: 80 }).notNull().unique(),
+  sourceName: varchar("sourceName", { length: 180 }).notNull(),
+  branchId: int("branchId"),
+  centerType: mysqlEnum("centerType", ["branch", "warehouse", "headquarters", "representative"]).default("branch").notNull(),
+  isSalesCenter: boolean("isSalesCenter").default(true).notNull(),
+  isActive: boolean("isActive").default(true).notNull(),
+  notes: text("notes"),
+  createdBy: int("createdBy"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
 export const branchFinancialSnapshots = mysqlTable("branchFinancialSnapshots", {
   id: int("id").autoincrement().primaryKey(),
   branchId: int("branchId").notNull(),

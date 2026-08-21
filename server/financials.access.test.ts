@@ -11,7 +11,7 @@ const db = {
 
 vi.mock("./db", async importOriginal => {
   const actual = await importOriginal<typeof import("./db")>();
-  return { ...actual, getDb: vi.fn(async () => db), listBranches: vi.fn(async () => [{ id: 1, name: "الفرع الرئيسي" }]) };
+  return { ...actual, getDb: vi.fn(async () => db), listBranches: vi.fn(async () => [{ id: 1, name: "الفرع الرئيسي", operationalType: "branch" }]) };
 });
 
 const { appRouter } = await import("./routers");
@@ -24,6 +24,12 @@ describe("monthly financial snapshots", () => {
     expect((await caller.financials.list({ year: 2026, month: 8 }))[0]).toMatchObject({ branchId: 1, netProfit: "4000.00" });
     expect(await caller.financials.upsert({ branchId: 1, year: 2026, month: 9, revenue: 12000, costOfGoods: 5000, operatingExpenses: 2500 })).toEqual({ id: 11, updated: false });
     expect(storedRows.find(row => row.netProfit === "4500.00")).toMatchObject({ netProfit: "4500.00", source: "manual" });
+  });
+
+  it("returns the cost-center expense summary with sales-center classification", async () => {
+    const summary = await appRouter.createCaller(admin).financials.expenseSummary({ year: 2026, month: 8 });
+    expect(summary[0]).toMatchObject({ branchId: 1, branchName: "الفرع الرئيسي", salesCenter: true, operatingExpenses: 2000, netProfit: 4000 });
+    await expect(appRouter.createCaller(viewer).financials.expenseSummary({ year: 2026, month: 8 })).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 
   it("enforces read scope, rejects unauthorized mutations, and validates periods", async () => {
