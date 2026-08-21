@@ -66,6 +66,14 @@ describe("continuous development pack wiring", () => {
     expect(scheduledView).toContain("scheduled-report-settings");
   });
 
+  it("keeps all scheduled report families in health and delivery wiring", () => {
+    expect(routers).toContain('log.action === "weekly_executive_digest"');
+    expect(routers).toContain('log.action === "weekly_executive_digest_failed"');
+    expect(scheduledView).toContain('"weekly_executive_digest_failed"');
+    expect(scheduledView).toContain('"scheduled_report_failed"');
+    expect(scheduledView).toContain("retryDelivery.mutate");
+  });
+
   it("wires delivery status to protected recipient reporting contracts", () => {
     expect(routers).toContain("scheduledReportDeliveries");
     expect(routers).toContain("deliveryStatus");

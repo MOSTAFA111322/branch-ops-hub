@@ -41,9 +41,10 @@ export const appRouter = router({
       const db = await getDb();
       const logs = db ? await db.select().from(auditLogs).where(eq(auditLogs.entityType, "scheduled_report")).limit(200) : [];
       const orderedLogs = logs.reverse();
-      const successLogs = orderedLogs.filter(log => log.action === "usage_digest" || log.action === "scheduled_report");
-      const failureLogs = orderedLogs.filter(log => log.action === "usage_digest_failed" || log.action === "scheduled_report_failed");
-      const latestLog = orderedLogs[0];
+      const successLogs = orderedLogs.filter(log => log.action === "usage_digest" || log.action === "scheduled_report" || log.action === "weekly_executive_digest");
+      const failureLogs = orderedLogs.filter(log => log.action === "usage_digest_failed" || log.action === "scheduled_report_failed" || log.action === "weekly_executive_digest_failed");
+      const executionLogs = [...successLogs, ...failureLogs].sort((a, b) => new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime());
+      const latestLog = executionLogs[0];
       const latestTimestamp = latestLog?.createdAt ? new Date(latestLog.createdAt).getTime() : null;
       const hoursSinceLastRun = latestTimestamp ? Math.max(0, Math.round((Date.now() - latestTimestamp) / 3600000)) : null;
       const latencyValues = orderedLogs.map(log => { try { const value = JSON.parse(log.afterData ?? "{}").latencyMs; return typeof value === "number" && Number.isFinite(value) ? value : null; } catch { return null; } }).filter((value): value is number => value !== null);
@@ -56,7 +57,7 @@ export const appRouter = router({
         hoursSinceLastRun !== null && hoursSinceLastRun > 120 ? "مر أكثر من خمسة أيام على آخر تنفيذ" : null,
       ].filter((reason): reason is string => Boolean(reason));
       const status = latestLog && failureLogs.includes(latestLog) ? "failed" : hoursSinceLastRun !== null && hoursSinceLastRun > 192 ? "stale" : warningReasons.length ? "warning" : "healthy";
-      const health = { status, warningReasons, hoursSinceLastRun, lastSuccessAt: successLogs[0]?.createdAt ?? null, lastFailureAt: failureLogs[0]?.createdAt ?? null, successCount: successLogs.length, failureCount: failureLogs.length, successRate, averageLatencyMs } as const;
+      const health = { status, warningReasons, hoursSinceLastRun, lastSuccessAt: [...successLogs].sort((a, b) => new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime())[0]?.createdAt ?? null, lastFailureAt: [...failureLogs].sort((a, b) => new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime())[0]?.createdAt ?? null, successCount: successLogs.length, failureCount: failureLogs.length, successRate, averageLatencyMs } as const;
       return { jobs: result.jobs, total: result.total, logs: orderedLogs, health };
     }),
     deliveryStatus: roleProcedure(["admin", "area_manager"]).input(z.object({ taskUid: z.string().min(1).max(120), marker: z.string().min(1).max(80) })).query(async ({ input }) => {
