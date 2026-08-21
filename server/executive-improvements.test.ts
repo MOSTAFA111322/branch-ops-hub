@@ -10,6 +10,16 @@ describe("executive improvements wiring", () => {
     expect(source).toContain('action: input.assigneeId !== undefined && input.assigneeId !== task.assigneeId ? "reassign" : "update"');
   });
 
+  it("exposes data quality and regional pilot wiring", () => {
+    const client = readFileSync(join(process.cwd(), "client/src/pages/Home.tsx"), "utf8");
+    const db = readFileSync(join(process.cwd(), "server/db.ts"), "utf8");
+    expect(client).toContain("جودة البيانات والالتزام");
+    expect(client).toContain("جاهزية البيانات قبل التوسع");
+    expect(client).toContain("averageCompletenessRate");
+    expect(db).toContain("dataQuality");
+    expect(db).toContain("averageVisitCommitmentRate");
+  });
+
   it("renders monthly executive trends and scheduled failure notification wiring", () => {
     const client = readFileSync(join(process.cwd(), "client/src/pages/Home.tsx"), "utf8");
     const scheduled = readFileSync(join(process.cwd(), "server/scheduled.ts"), "utf8");

@@ -102,10 +102,16 @@ export async function getOperationsOverview(user: Pick<User, "id" | "role" | "re
     const rows = await db.select().from(table).where(dateFilter).limit(100) as T[];
     return user.role === "admin" ? rows : rows.filter((row) => row.branchId == null || ids.includes(row.branchId));
   };
-  const [visitsRows, actionRows, documentRows, qualityRows, maintenanceRows, requestRows, taskRows, previousQualityRows, previousMaintenanceRows, previousTaskRows, financialRows] = await Promise.all([
+  const branchScope = user.role === "admin" || ids.length > 0;
+  const [visitsRows, actionRows, documentRows, qualityRows, maintenanceRows, requestRows, taskRows, previousQualityRows, previousMaintenanceRows, previousTaskRows, financialRows, employeeRows, assetRows, contractRows, inventoryRows, allDocumentRows] = await Promise.all([
     filterRows(visits, since), filterRows(correctiveActions, since), filterRows(documents, since), filterRows(qualityCases, since), filterRows(maintenanceTickets, since), filterRows(internalRequests, since), filterRows(tasks, since),
     filterRows(qualityCases, previousSince, since), filterRows(maintenanceTickets, previousSince, since), filterRows(tasks, previousSince, since),
     db.select().from(branchFinancialSnapshots).orderBy(desc(branchFinancialSnapshots.periodYear), desc(branchFinancialSnapshots.periodMonth)).limit(240),
+    branchScope ? db.select().from(branchEmployees).where(inArray(branchEmployees.branchId, ids)) : db.select().from(branchEmployees),
+    branchScope ? db.select().from(branchAssets).where(inArray(branchAssets.branchId, ids)) : db.select().from(branchAssets),
+    branchScope ? db.select().from(branchContracts).where(inArray(branchContracts.branchId, ids)) : db.select().from(branchContracts),
+    branchScope ? db.select().from(branchInventory).where(inArray(branchInventory.branchId, ids)) : db.select().from(branchInventory),
+    branchScope ? db.select().from(documents).where(inArray(documents.branchId, ids)) : db.select().from(documents),
   ]);
   const scopedTasks = user.role === "admin" ? taskRows : taskRows.filter((row: any) => row.assigneeId === user.id);
   const scopedPreviousTasks = user.role === "admin" ? previousTaskRows : previousTaskRows.filter((row: any) => row.assigneeId === user.id);
@@ -153,6 +159,23 @@ export async function getOperationsOverview(user: Pick<User, "id" | "role" | "re
       complianceRate: operationalSummary.compliance.rate === null || previousOperationalSummary.compliance.rate === null ? null : operationalSummary.compliance.rate - previousOperationalSummary.compliance.rate,
     },
   };
+  const dataQuality = visible.map((branch) => {
+    const missingFields = [
+      !branch.managerName ? "مدير الفرع" : null,
+      !branch.phone ? "رقم التواصل" : null,
+      !branch.address ? "العنوان" : null,
+      !branch.regionId ? "المنطقة المرتبطة" : null,
+      !(employeeRows as Array<{ branchId: number }>).some((row) => row.branchId === branch.id) ? "بيانات الموظفين" : null,
+      !(assetRows as Array<{ branchId: number }>).some((row) => row.branchId === branch.id) ? "الأصول" : null,
+      !(contractRows as Array<{ branchId: number }>).some((row) => row.branchId === branch.id) ? "العقود" : null,
+      !(inventoryRows as Array<{ branchId: number }>).some((row) => row.branchId === branch.id) ? "المخزون" : null,
+      !(allDocumentRows as Array<{ branchId: number }>).some((row) => row.branchId === branch.id) ? "الوثائق" : null,
+    ].filter((value): value is string => Boolean(value));
+    const completedVisits = (visitsRows as Array<{ branchId: number; status?: string }>).filter((row) => row.branchId === branch.id && row.status === "completed").length;
+    const plannedVisits = (visitsRows as Array<{ branchId: number }>).filter((row) => row.branchId === branch.id).length;
+    return { branchId: branch.id, branchName: branch.name, completenessRate: Math.round(((9 - missingFields.length) / 9) * 100), missingFields, plannedVisits, completedVisits, visitCommitmentRate: plannedVisits ? Math.round((completedVisits / plannedVisits) * 100) : null };
+  });
+  const qualitySummary = { averageCompletenessRate: dataQuality.length ? Math.round(dataQuality.reduce((sum, item) => sum + item.completenessRate, 0) / dataQuality.length) : null, branchesNeedingData: dataQuality.filter((item) => item.missingFields.length > 0).length, averageVisitCommitmentRate: (() => { const rows = dataQuality.filter((item) => item.visitCommitmentRate !== null); return rows.length ? Math.round(rows.reduce((sum, item) => sum + (item.visitCommitmentRate ?? 0), 0) / rows.length) : null; })() };
   const comparison = visible.map((branch, index) => ({ id: branch.id, name: branch.name, city: branch.city, healthScore: branch.healthScore, openActions: branch.openActions, riskLevel: Number(branch.healthScore) < 75 ? "مرتفع" : Number(branch.healthScore) < 85 ? "متوسط" : "مستقر", activityCount: activityRows.filter((row) => row.branchId === branch.id).length, period, rank: index + 1 }));
   const visibleFinancialRows = (user.role === "admin" ? financialRows : financialRows.filter((row) => ids.includes(row.branchId))) as Array<{ branchId: number; periodYear: number; periodMonth: number; revenue: string | number; netProfit: string | number }>;
   const trendMap = new Map<string, { period: string; year: number; month: number; revenue: number; netProfit: number; branches: number }>();
@@ -165,7 +188,7 @@ export async function getOperationsOverview(user: Pick<User, "id" | "role" | "re
     trendMap.set(key, current);
   }
   const financialTrend = Array.from(trendMap.values()).sort((a, b) => a.period.localeCompare(b.period)).slice(-12);
-  return { comparison, financialTrend, visits: visitsRows, actions: actionRows, documents: documentRows, qualityCases: qualityRows, qualityAnalysis, operationalSummary, previousOperationalSummary, operationalComparison, maintenanceTickets: maintenanceRows, requests: scopedRequests, tasks: scopedTasks, tasksAndRequests: [...scopedTasks, ...scopedRequests] };
+  return { comparison, financialTrend, visits: visitsRows, actions: actionRows, documents: documentRows, qualityCases: qualityRows, qualityAnalysis, operationalSummary, previousOperationalSummary, operationalComparison, dataQuality, qualitySummary, maintenanceTickets: maintenanceRows, requests: scopedRequests, tasks: scopedTasks, tasksAndRequests: [...scopedTasks, ...scopedRequests] };
 }
 
 export async function getDashboardSummary(user: Pick<User, "id" | "role" | "regionId" | "branchId">) {
