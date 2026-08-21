@@ -29,6 +29,17 @@ export const scheduledReportRecipients = mysqlTable("scheduledReportRecipients",
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 }, (table) => ({ uniqueRecipient: uniqueIndex("scheduledReportRecipients_task_recipient_unique").on(table.taskUid, table.recipientId) }));
 
+export const scheduledReportDeliveries = mysqlTable("scheduledReportDeliveries", {
+  id: int("id").autoincrement().primaryKey(),
+  taskUid: varchar("taskUid", { length: 120 }).notNull(),
+  marker: varchar("marker", { length: 80 }).notNull(),
+  recipientId: int("recipientId").notNull(),
+  status: mysqlEnum("status", ["delivered", "failed"]).default("delivered").notNull(),
+  notificationId: int("notificationId"),
+  error: text("error"),
+  deliveredAt: timestamp("deliveredAt").defaultNow().notNull(),
+}, (table) => ({ uniqueDelivery: uniqueIndex("scheduledReportDeliveries_task_marker_recipient_unique").on(table.taskUid, table.marker, table.recipientId) }));
+
 export const regions = mysqlTable("regions", {
   id: int("id").autoincrement().primaryKey(),
   name: varchar("name", { length: 120 }).notNull().unique(),

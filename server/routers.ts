@@ -8,7 +8,7 @@ import { and, eq, inArray, isNull } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { getBranchById, getBranchProfile, getDashboardSummary, getOperationsOverview, listBranches, getDb } from "./db";
 import { retryCommandUsageDigest } from "./scheduled";
-import { branches, regions, branchAssets, branchFinancialSnapshots, checklistItems, checklistTemplates, correctiveActions, dashboardPreferences, documentVersions, documents, internalRequests, maintenanceTickets, qualityCases, tasks, users, visitChecklistResults, visits, auditLogs, notifications, reportApprovals, scheduledReportRecipients } from "../drizzle/schema";
+import { branches, regions, branchAssets, branchFinancialSnapshots, checklistItems, checklistTemplates, correctiveActions, dashboardPreferences, documentVersions, documents, internalRequests, maintenanceTickets, qualityCases, tasks, users, visitChecklistResults, visits, auditLogs, notifications, reportApprovals, scheduledReportRecipients, scheduledReportDeliveries } from "../drizzle/schema";
 
 async function recordAudit(db: any, input: { actorId?: number; branchId?: number; entityType: string; entityId?: number; action: string; beforeData?: unknown; afterData?: unknown }) {
   await db.insert(auditLogs).values({
@@ -58,6 +58,11 @@ export const appRouter = router({
       const status = latestLog && failureLogs.includes(latestLog) ? "failed" : hoursSinceLastRun !== null && hoursSinceLastRun > 192 ? "stale" : warningReasons.length ? "warning" : "healthy";
       const health = { status, warningReasons, hoursSinceLastRun, lastSuccessAt: successLogs[0]?.createdAt ?? null, lastFailureAt: failureLogs[0]?.createdAt ?? null, successCount: successLogs.length, failureCount: failureLogs.length, successRate, averageLatencyMs } as const;
       return { jobs: result.jobs, total: result.total, logs: orderedLogs, health };
+    }),
+    deliveryStatus: roleProcedure(["admin", "area_manager"]).input(z.object({ taskUid: z.string().min(1).max(120), marker: z.string().min(1).max(80) })).query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      return db.select().from(scheduledReportDeliveries).where(and(eq(scheduledReportDeliveries.taskUid, input.taskUid), eq(scheduledReportDeliveries.marker, input.marker))).limit(100);
     }),
     recipients: roleProcedure(["admin", "area_manager"]).query(async () => {
       const db = await getDb();

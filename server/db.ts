@@ -102,12 +102,13 @@ export async function getOperationsOverview(user: Pick<User, "id" | "role" | "re
     const rows = await db.select().from(table).where(dateFilter).limit(100) as T[];
     return user.role === "admin" ? rows : rows.filter((row) => row.branchId == null || ids.includes(row.branchId));
   };
-  const [visitsRows, actionRows, documentRows, qualityRows, maintenanceRows, requestRows, taskRows, previousQualityRows, previousMaintenanceRows, financialRows] = await Promise.all([
+  const [visitsRows, actionRows, documentRows, qualityRows, maintenanceRows, requestRows, taskRows, previousQualityRows, previousMaintenanceRows, previousTaskRows, financialRows] = await Promise.all([
     filterRows(visits, since), filterRows(correctiveActions, since), filterRows(documents, since), filterRows(qualityCases, since), filterRows(maintenanceTickets, since), filterRows(internalRequests, since), filterRows(tasks, since),
-    filterRows(qualityCases, previousSince, since), filterRows(maintenanceTickets, previousSince, since),
+    filterRows(qualityCases, previousSince, since), filterRows(maintenanceTickets, previousSince, since), filterRows(tasks, previousSince, since),
     db.select().from(branchFinancialSnapshots).orderBy(desc(branchFinancialSnapshots.periodYear), desc(branchFinancialSnapshots.periodMonth)).limit(240),
   ]);
   const scopedTasks = user.role === "admin" ? taskRows : taskRows.filter((row: any) => row.assigneeId === user.id);
+  const scopedPreviousTasks = user.role === "admin" ? previousTaskRows : previousTaskRows.filter((row: any) => row.assigneeId === user.id);
   const scopedRequests = user.role === "admin" ? requestRows : requestRows.filter((row: any) => row.requesterId === user.id);
   const activityRows = [...visitsRows, ...actionRows, ...qualityRows, ...maintenanceRows, ...scopedRequests, ...scopedTasks] as Array<{ branchId?: number | null }>;
   const qualityCounts = new Map<string, { cause: string; count: number; open: number }>();
@@ -119,7 +120,7 @@ export async function getOperationsOverview(user: Pick<User, "id" | "role" | "re
     qualityCounts.set(cause, current);
   }
   const qualityAnalysis = Array.from(qualityCounts.values()).sort((a, b) => b.count - a.count || b.open - a.open);
-  const summarizeOperations = (qualityInput: any[], maintenanceInput: any[]) => ({
+  const summarizeOperations = (qualityInput: any[], maintenanceInput: any[], taskInput: any[]) => ({
     quality: {
       total: qualityInput.length,
       open: qualityInput.filter((row: any) => !["closed", "resolved"].includes(row.status)).length,
@@ -133,9 +134,14 @@ export async function getOperationsOverview(user: Pick<User, "id" | "role" | "re
       breakdowns: maintenanceInput.filter((row: any) => row.ticketType === "breakdown").length,
       preventive: maintenanceInput.filter((row: any) => row.ticketType === "preventive").length,
     },
+    compliance: {
+      total: taskInput.length,
+      completed: taskInput.filter((row: any) => row.status === "done").length,
+      rate: taskInput.length ? Math.round((taskInput.filter((row: any) => row.status === "done").length / taskInput.length) * 100) : null,
+    },
   });
-  const operationalSummary = { ...summarizeOperations(qualityRows, maintenanceRows), period };
-  const previousOperationalSummary = { ...summarizeOperations(previousQualityRows, previousMaintenanceRows), period };
+  const operationalSummary = { ...summarizeOperations(qualityRows, maintenanceRows, scopedTasks), period };
+  const previousOperationalSummary = { ...summarizeOperations(previousQualityRows, previousMaintenanceRows, scopedPreviousTasks), period };
   const operationalComparison = {
     current: operationalSummary,
     previous: previousOperationalSummary,
@@ -144,6 +150,7 @@ export async function getOperationsOverview(user: Pick<User, "id" | "role" | "re
       qualityOpen: operationalSummary.quality.open - previousOperationalSummary.quality.open,
       maintenanceTotal: operationalSummary.maintenance.total - previousOperationalSummary.maintenance.total,
       maintenanceOpen: operationalSummary.maintenance.open - previousOperationalSummary.maintenance.open,
+      complianceRate: operationalSummary.compliance.rate === null || previousOperationalSummary.compliance.rate === null ? null : operationalSummary.compliance.rate - previousOperationalSummary.compliance.rate,
     },
   };
   const comparison = visible.map((branch, index) => ({ id: branch.id, name: branch.name, city: branch.city, healthScore: branch.healthScore, openActions: branch.openActions, riskLevel: Number(branch.healthScore) < 75 ? "مرتفع" : Number(branch.healthScore) < 85 ? "متوسط" : "مستقر", activityCount: activityRows.filter((row) => row.branchId === branch.id).length, period, rank: index + 1 }));

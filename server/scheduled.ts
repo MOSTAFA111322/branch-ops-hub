@@ -3,7 +3,7 @@ import { eq, inArray } from "drizzle-orm";
 import { getDb } from "./db";
 import { sdk } from "./_core/sdk";
 import { notifyOwner } from "./_core/notification";
-import { auditLogs, branchFinancialSnapshots, branches, users, scheduledReportRecipients, notifications } from "../drizzle/schema";
+import { auditLogs, branchFinancialSnapshots, branches, users, scheduledReportRecipients, scheduledReportDeliveries, notifications } from "../drizzle/schema";
 
 export const MONTHLY_REPORT_RECIPIENT_ROLES = ["admin", "area_manager", "quality"] as const;
 
@@ -13,9 +13,24 @@ async function resolveReportRecipients(db: NonNullable<Awaited<ReturnType<typeof
   return rows.map((recipient) => ({ id: recipient.id, name: recipient.name ?? recipient.email ?? `مستخدم ${recipient.id}`, email: recipient.email, role: recipient.role }));
 }
 
-async function notifyReportRecipients(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, recipients: Array<{ id: number }>, title: string, content: string) {
-  if (!recipients.length) return;
-  await db.insert(notifications).values(recipients.map((recipient) => ({ recipientId: recipient.id, kind: "scheduled_report", title, content, entityType: "scheduled_report" })));
+async function notifyReportRecipients(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, taskUid: string, marker: string, recipients: Array<{ id: number }>, title: string, content: string) {
+  let delivered = 0;
+  let failed = 0;
+  for (const recipient of recipients) {
+    try {
+      await db.insert(notifications).values({ recipientId: recipient.id, kind: "scheduled_report", title, content, entityType: "scheduled_report" });
+      await db.insert(scheduledReportDeliveries).values({ taskUid, marker, recipientId: recipient.id, status: "delivered" });
+      delivered += 1;
+    } catch (error) {
+      failed += 1;
+      try {
+        await db.insert(scheduledReportDeliveries).values({ taskUid, marker, recipientId: recipient.id, status: "failed", error: error instanceof Error ? error.message : String(error) });
+      } catch (deliveryError) {
+        console.error("[ScheduledReport] delivery audit failed", deliveryError);
+      }
+    }
+  }
+  return { delivered, failed };
 }
 
 export async function monthlyFinancialReportHandler(req: Request, res: Response) {
@@ -48,8 +63,8 @@ export async function monthlyFinancialReportHandler(req: Request, res: Response)
     const recipientLabel = recipients.length > 0 ? recipients.map((recipient) => `${recipient.name} (${recipient.role})`).join("، ") : "لا يوجد مسؤولون إداريون مسجلون";
     const content = `المستلمون الإداريون: ${recipientLabel}\nالفترة: ${year}-${String(month).padStart(2, "0")}\nعدد الفروع المسجلة: ${periodRows.length}\nإجمالي الإيرادات: ${totalRevenue.toFixed(2)}\nإجمالي صافي الربح: ${totalProfit.toFixed(2)}`;
     const delivered = await notifyOwner({ title: "التقرير المالي الشهري للفروع", content });
-    await notifyReportRecipients(db, recipients, "التقرير المالي الشهري للفروع", content);
-    await db.insert(auditLogs).values({ actorId: user.id, entityType: "scheduled_report", action: "scheduled_report", afterData: JSON.stringify({ marker, delivered, taskUid: user.taskUid, latencyMs: Date.now() - startedAt, recipientIds: recipients.map((recipient) => recipient.id), recipientRoles: recipients.map((recipient) => recipient.role) }) });
+    const delivery = await notifyReportRecipients(db, user.taskUid, marker, recipients, "التقرير المالي الشهري للفروع", content);
+    await db.insert(auditLogs).values({ actorId: user.id, entityType: "scheduled_report", action: "scheduled_report", afterData: JSON.stringify({ marker, delivered, taskUid: user.taskUid, latencyMs: Date.now() - startedAt, recipientIds: recipients.map((recipient) => recipient.id), recipientRoles: recipients.map((recipient) => recipient.role), delivery }) });
     return res.json({ ok: true, delivered, marker });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -87,8 +102,8 @@ export async function commandUsageDigestHandler(req: Request, res: Response) {
     const content = `الفترة: آخر 30 يومًا\nإجمالي الاستخدامات: ${rows.filter(row => row.createdAt >= since).length}\nالأوامر الأكثر استعمالًا: ${top.map(([command, count]) => `${command} (${count})`).join("، ") || "لا توجد بيانات"}`;
     const recipients = await resolveReportRecipients(db, user.taskUid, ["admin", "area_manager"]);
     const delivered = await notifyOwner({ title: "ملخص استخدام أوامر مركز التشغيل", content });
-    await notifyReportRecipients(db, recipients, "ملخص استخدام أوامر مركز التشغيل", content);
-    await db.insert(auditLogs).values({ actorId: user.id, entityType: "scheduled_report", action: "usage_digest", afterData: JSON.stringify({ marker, delivered, taskUid: user.taskUid, latencyMs: Date.now() - startedAt, recipientIds: recipients.map((recipient) => recipient.id), top }) });
+    const delivery = await notifyReportRecipients(db, user.taskUid, marker, recipients, "ملخص استخدام أوامر مركز التشغيل", content);
+    await db.insert(auditLogs).values({ actorId: user.id, entityType: "scheduled_report", action: "usage_digest", afterData: JSON.stringify({ marker, delivered, taskUid: user.taskUid, latencyMs: Date.now() - startedAt, recipientIds: recipients.map((recipient) => recipient.id), delivery, top }) });
     return res.json({ ok: true, delivered, marker, top });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

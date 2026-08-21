@@ -66,6 +66,14 @@ describe("continuous development pack wiring", () => {
     expect(scheduledView).toContain("scheduled-report-settings");
   });
 
+  it("wires delivery status to protected recipient reporting contracts", () => {
+    expect(routers).toContain("scheduledReportDeliveries");
+    expect(routers).toContain("deliveryStatus");
+    expect(scheduled).toContain("status: \"delivered\"");
+    expect(scheduledView).toContain("حالة تسليم آخر تشغيل");
+    expect(scheduledView).toContain("تم التسليم");
+  });
+
   it("wires scheduled report recipients to protected admin contracts", () => {
     expect(routers).toContain("scheduledReportRecipients");
     expect(routers).toContain("saveRecipients");
