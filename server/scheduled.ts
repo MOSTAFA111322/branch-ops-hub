@@ -3,7 +3,7 @@ import { eq, inArray } from "drizzle-orm";
 import { getDb } from "./db";
 import { sdk } from "./_core/sdk";
 import { notifyOwner } from "./_core/notification";
-import { auditLogs, branchFinancialSnapshots, branches, users, scheduledReportRecipients, scheduledReportDeliveries, notifications } from "../drizzle/schema";
+import { auditLogs, branchFinancialSnapshots, branches, users, scheduledReportRecipients, scheduledReportDeliveries, notifications, tasks, qualityCases, maintenanceTickets } from "../drizzle/schema";
 
 export const MONTHLY_REPORT_RECIPIENT_ROLES = ["admin", "area_manager", "quality"] as const;
 
@@ -31,6 +31,30 @@ async function notifyReportRecipients(db: NonNullable<Awaited<ReturnType<typeof 
     }
   }
   return { delivered, failed };
+}
+
+export async function retryScheduledReportDelivery(input: { taskUid: string; marker: string; recipientId: number; actorId: number }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const previousRows = await db.select().from(scheduledReportDeliveries).where(eq(scheduledReportDeliveries.taskUid, input.taskUid)).limit(500);
+  const failed = previousRows.find((row) => row.marker === input.marker && row.recipientId === input.recipientId && row.status === "failed");
+  if (!failed) throw new Error("لا يوجد تسليم فاشل مطابق لإعادة الإرسال");
+  const recentRetry = previousRows.find((row) => row.recipientId === input.recipientId && row.marker.startsWith(`${input.marker}:retry:`) && Date.now() - new Date(row.deliveredAt).getTime() < 5 * 60 * 1000);
+  if (recentRetry) return { ok: true, skipped: "recent-retry", deliveryId: recentRetry.id } as const;
+  const recipient = (await db.select({ id: users.id, name: users.name, email: users.email, role: users.role }).from(users).where(eq(users.id, input.recipientId)).limit(1))[0];
+  if (!recipient) throw new Error("المستلم غير موجود");
+  const retryMarker = `${input.marker}:retry:${Date.now()}`.slice(0, 80);
+  const title = "إعادة إرسال تقرير مجدول";
+  const content = `إعادة إرسال يدوية من المسؤول\nالوظيفة: ${input.taskUid}\nالمرجع: ${input.marker}`;
+  try {
+    const notification = await db.insert(notifications).values({ recipientId: recipient.id, kind: "scheduled_report", title, content, entityType: "scheduled_report" });
+    const inserted = await db.insert(scheduledReportDeliveries).values({ taskUid: input.taskUid, marker: retryMarker, recipientId: recipient.id, status: "delivered", notificationId: Number((notification as any).insertId ?? 0) || null });
+    return { ok: true, deliveryId: Number((inserted as any).insertId ?? 0) || null, retryMarker } as const;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await db.insert(scheduledReportDeliveries).values({ taskUid: input.taskUid, marker: retryMarker, recipientId: recipient.id, status: "failed", error: message });
+    throw error;
+  }
 }
 
 export async function monthlyFinancialReportHandler(req: Request, res: Response) {
@@ -112,6 +136,49 @@ export async function commandUsageDigestHandler(req: Request, res: Response) {
   }
 }
 
+export async function weeklyExecutiveDigestHandler(req: Request, res: Response) {
+  const context = { url: req.originalUrl, timestamp: new Date().toISOString() };
+  const startedAt = Date.now();
+  let db: Awaited<ReturnType<typeof getDb>> = null;
+  let actorId: number | undefined;
+  let marker = "weekly-executive-digest:unknown";
+  try {
+    const user = await sdk.authenticateRequest(req);
+    actorId = user.id;
+    if (!user.isCron || !user.taskUid) return res.status(403).json({ error: "cron-only" });
+    db = await getDb();
+    if (!db) return res.status(503).json({ error: "database-unavailable", context });
+    const now = new Date();
+    const since = new Date(now.getTime() - 7 * 86400000);
+    const previousSince = new Date(now.getTime() - 14 * 86400000);
+    marker = `weekly-executive-digest:${now.toISOString().slice(0, 10)}`;
+    const existing = await db.select({ afterData: auditLogs.afterData }).from(auditLogs).where(eq(auditLogs.action, "weekly_executive_digest"));
+    if (existing.some((row) => row.afterData?.includes(marker))) return res.json({ ok: true, skipped: "already-sent", marker });
+    const [taskRows, qualityRows, maintenanceRows] = await Promise.all([
+      db.select({ branchId: tasks.branchId, branchName: branches.name, status: tasks.status, createdAt: tasks.createdAt }).from(tasks).leftJoin(branches, eq(branches.id, tasks.branchId)).limit(5000),
+      db.select({ branchId: qualityCases.branchId, branchName: branches.name, status: qualityCases.status, createdAt: qualityCases.createdAt }).from(qualityCases).leftJoin(branches, eq(branches.id, qualityCases.branchId)).limit(5000),
+      db.select({ branchId: maintenanceTickets.branchId, branchName: branches.name, status: maintenanceTickets.status, createdAt: maintenanceTickets.createdAt }).from(maintenanceTickets).leftJoin(branches, eq(branches.id, maintenanceTickets.branchId)).limit(5000),
+    ]);
+    const branchScores = new Map<number, { name: string; current: number; previous: number }>();
+    const ensure = (branchId: number | null, branchName: string | null) => { if (branchId === null) return null; const row = branchScores.get(branchId) ?? { name: branchName ?? `فرع ${branchId}`, current: 0, previous: 0 }; branchScores.set(branchId, row); return row; };
+    taskRows.forEach((row) => { const target = ensure(row.branchId, row.branchName); if (!target) return; const weight = row.status === "done" ? 2 : -1; if (row.createdAt >= since) target.current += weight; else if (row.createdAt >= previousSince) target.previous += weight; });
+    qualityRows.forEach((row) => { const target = ensure(row.branchId, row.branchName); if (!target) return; const weight = row.status === "resolved" || row.status === "closed" ? 1 : -2; if (row.createdAt >= since) target.current += weight; else if (row.createdAt >= previousSince) target.previous += weight; });
+    maintenanceRows.forEach((row) => { const target = ensure(row.branchId, row.branchName); if (!target) return; const weight = row.status === "resolved" || row.status === "closed" ? 1 : -2; if (row.createdAt >= since) target.current += weight; else if (row.createdAt >= previousSince) target.previous += weight; });
+    const improved = Array.from(branchScores.values()).map((row) => ({ ...row, delta: row.current - row.previous })).filter((row) => row.delta > 0).sort((a, b) => b.delta - a.delta).slice(0, 5);
+    const declined = Array.from(branchScores.values()).map((row) => ({ ...row, delta: row.current - row.previous })).filter((row) => row.delta < 0).sort((a, b) => a.delta - b.delta).slice(0, 5);
+    const content = `الفترة: آخر 7 أيام مقارنة بالـ7 أيام السابقة\nالفروع المتحسنة: ${improved.map((row) => `${row.name} (${row.delta > 0 ? "+" : ""}${row.delta})`).join("، ") || "لا توجد بيانات كافية"}\nالفروع المتراجعة: ${declined.map((row) => `${row.name} (${row.delta})`).join("، ") || "لا توجد بيانات كافية"}`;
+    const recipients = await resolveReportRecipients(db, user.taskUid, ["admin", "area_manager"]);
+    const delivered = await notifyOwner({ title: "التقرير التنفيذي الأسبوعي للفروع", content });
+    const delivery = await notifyReportRecipients(db, user.taskUid, marker, recipients, "التقرير التنفيذي الأسبوعي للفروع", content);
+    await db.insert(auditLogs).values({ actorId, entityType: "scheduled_report", action: "weekly_executive_digest", afterData: JSON.stringify({ marker, taskUid: user.taskUid, delivered, delivery, improved, declined, latencyMs: Date.now() - startedAt }) });
+    return res.json({ ok: true, marker, improved, declined, delivery });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    try { await notifyOwner({ title: "فشل التقرير التنفيذي الأسبوعي", content: `تعذر تنفيذ التقرير الأسبوعي ${marker}. السبب: ${message}` }); if (db) await db.insert(auditLogs).values({ actorId, entityType: "scheduled_report", action: "weekly_executive_digest_failed", afterData: JSON.stringify({ marker, error: message, latencyMs: Date.now() - startedAt, context }) }); } catch (notificationError) { console.error("[WeeklyExecutiveDigest] failure notification failed", notificationError); }
+    return res.status(500).json({ error: message, context });
+  }
+}
+
 export async function retryCommandUsageDigest(actorId: number) {
   const db = await getDb();
   if (!db) throw new Error("Database unavailable");
@@ -137,7 +204,7 @@ export async function retryCommandUsageDigest(actorId: number) {
   }
 }
 
-export const scheduledHandlers = { monthlyFinancialReportHandler, commandUsageDigestHandler };
+export const scheduledHandlers = { monthlyFinancialReportHandler, commandUsageDigestHandler, weeklyExecutiveDigestHandler };
 
 void scheduledHandlers;
 

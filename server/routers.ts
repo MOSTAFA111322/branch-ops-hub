@@ -7,7 +7,7 @@ import { listHeartbeatJobs, updateHeartbeatJob } from "./_core/heartbeat";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { getBranchById, getBranchProfile, getDashboardSummary, getOperationsOverview, listBranches, getDb } from "./db";
-import { retryCommandUsageDigest } from "./scheduled";
+import { retryCommandUsageDigest, retryScheduledReportDelivery } from "./scheduled";
 import { branches, regions, branchAssets, branchFinancialSnapshots, checklistItems, checklistTemplates, correctiveActions, dashboardPreferences, documentVersions, documents, internalRequests, maintenanceTickets, qualityCases, tasks, users, visitChecklistResults, visits, auditLogs, notifications, reportApprovals, scheduledReportRecipients, scheduledReportDeliveries } from "../drizzle/schema";
 
 async function recordAudit(db: any, input: { actorId?: number; branchId?: number; entityType: string; entityId?: number; action: string; beforeData?: unknown; afterData?: unknown }) {
@@ -63,6 +63,12 @@ export const appRouter = router({
       const db = await getDb();
       if (!db) throw new Error("Database unavailable");
       return db.select().from(scheduledReportDeliveries).where(and(eq(scheduledReportDeliveries.taskUid, input.taskUid), eq(scheduledReportDeliveries.marker, input.marker))).limit(100);
+    }),
+    retryDelivery: roleProcedure(["admin", "area_manager"]).input(z.object({ taskUid: z.string().min(1).max(120), marker: z.string().min(1).max(80), recipientId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
+      const result = await retryScheduledReportDelivery({ ...input, actorId: ctx.user.id });
+      const db = await getDb();
+      if (db) await recordAudit(db, { actorId: ctx.user.id, entityType: "scheduled_report", action: "delivery_manual_retry", afterData: { ...input, result } });
+      return result;
     }),
     recipients: roleProcedure(["admin", "area_manager"]).query(async () => {
       const db = await getDb();
