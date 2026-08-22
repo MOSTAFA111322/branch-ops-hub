@@ -10,6 +10,7 @@ import { getBranchById, getBranchProfile, getDashboardSummary, getOperationsOver
 import { retryCommandUsageDigest, retryScheduledReportDelivery } from "./scheduled";
 import { branches, regions, branchAssets, branchFinancialSnapshots, checklistItems, checklistTemplates, correctiveActions, dashboardPreferences, documentVersions, documents, internalRequests, maintenanceTickets, qualityCases, tasks, users, visitChecklistResults, visits, auditLogs, notifications, reportApprovals, scheduledReportRecipients, scheduledReportDeliveries, costCenterMappings } from "../drizzle/schema";
 import { aggregateFinancialComparison } from "../shared/financials";
+import { invokeLLM } from "./_core/llm";
 
 async function recordAudit(db: any, input: { actorId?: number; branchId?: number; entityType: string; entityId?: number; action: string; beforeData?: unknown; afterData?: unknown }) {
   await db.insert(auditLogs).values({
@@ -35,6 +36,36 @@ export const appRouter = router({
   }),
   dashboard: router({
     summary: protectedProcedure.query(({ ctx }) => getDashboardSummary(ctx.user)),
+  }),
+  assistant: router({
+    ask: roleProcedure(["admin", "area_manager"]).input(z.object({
+      question: z.string().trim().min(2).max(1200),
+      history: z.array(z.object({ role: z.enum(["user", "assistant"]), content: z.string().max(4000) })).max(12).default([]),
+    })).mutation(async ({ input, ctx }) => {
+      const overview = await getOperationsOverview(ctx.user);
+      const context = JSON.stringify({
+        financialTrend: overview.financialTrend,
+        financialByBranch: overview.financialByBranch,
+        operationalSummary: overview.operationalSummary,
+        operationalComparison: overview.operationalComparison,
+        qualityAnalysis: overview.qualityAnalysis,
+        dataQuality: overview.dataQuality,
+        openActions: overview.tasksAndRequests?.filter((item: any) => item.status !== "done" && item.status !== "completed").length ?? 0,
+      });
+      const response = await invokeLLM({
+        model: "gpt-5-mini",
+        reasoning: { effort: "minimal" },
+        maxTokens: 900,
+        messages: [
+          { role: "system", content: "أنت مساعد عمليات وتحليل مالي لمدير منطقة في شركة محامص سعودية. أجب بالعربية وبأسلوب مهني مختصر. استخدم الأرقام الواردة فقط، ولا تخترع بيانات أو تقييمات. اربط كل توصية بمؤشر واضح، واذكر عندما لا تكفي البيانات للإجابة. لا تكشف بيانات مستخدمين أو أسرار النظام." },
+          { role: "user", content: `بيانات لوحة المستخدم الحالية (JSON): ${context}` },
+          ...input.history,
+          { role: "user", content: input.question },
+        ],
+      });
+      const content = response.choices?.[0]?.message?.content;
+      return { answer: typeof content === "string" ? content : "تعذر تكوين إجابة نصية من المساعد. حاول إعادة صياغة السؤال." };
+    }),
   }),
   heartbeat: router({
     jobs: roleProcedure(["admin", "area_manager"]).query(async ({ ctx }) => {
