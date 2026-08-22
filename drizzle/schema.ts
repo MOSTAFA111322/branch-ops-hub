@@ -45,6 +45,16 @@ export const dashboardPreferences = mysqlTable("dashboardPreferences", {
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 
+export const favoritePeriodRanges = mysqlTable("favoritePeriodRanges", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  name: varchar("name", { length: 120 }).notNull(),
+  fromDate: varchar("fromDate", { length: 10 }).notNull(),
+  toDate: varchar("toDate", { length: 10 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => ({ userFavoriteNameUnique: uniqueIndex("favorite_period_user_name_unique").on(table.userId, table.name) }));
+
 export const scheduledReportRecipients = mysqlTable("scheduledReportRecipients", {
   id: int("id").autoincrement().primaryKey(),
   taskUid: varchar("taskUid", { length: 120 }).notNull(),

@@ -1,6 +1,6 @@
 import { and, desc, eq, inArray, gte, lt } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { branches, branchAssets, branchContracts, branchEmployees, branchEvents, branchInventory, branchFinancialSnapshots, correctiveActions, documents, internalRequests, maintenanceTickets, qualityCases, tasks, users, visits, inventoryMovementSnapshots, userBranchPermissions, InsertUser, User } from "../drizzle/schema";
+import { branches, branchAssets, branchContracts, branchEmployees, branchEvents, branchInventory, branchFinancialSnapshots, correctiveActions, documents, internalRequests, maintenanceTickets, qualityCases, tasks, users, visits, inventoryMovementSnapshots, userBranchPermissions, favoritePeriodRanges, InsertUser, User } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -294,4 +294,30 @@ export async function getDashboardSummary(user: Pick<User, "id" | "role" | "regi
     alerts,
     smartInventorySummary: { currentPeriod, previousPeriod, currentSales, previousSales, salesChangePercent, priorYearPeriod, priorYearSales, yearOverYearChangePercent, staleCount: staleItems.length, lowStockCount: lowStockItems.length, staleItems, lowStockItems },
   };
+}
+
+
+export async function listFavoritePeriodRanges(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(favoritePeriodRanges).where(eq(favoritePeriodRanges.userId, userId)).orderBy(desc(favoritePeriodRanges.updatedAt));
+}
+
+export async function saveFavoritePeriodRange(input: { userId: number; name: string; fromDate: string; toDate: string }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const [existing] = await db.select().from(favoritePeriodRanges).where(and(eq(favoritePeriodRanges.userId, input.userId), eq(favoritePeriodRanges.name, input.name))).limit(1);
+  if (existing) {
+    await db.update(favoritePeriodRanges).set({ fromDate: input.fromDate, toDate: input.toDate }).where(eq(favoritePeriodRanges.id, existing.id));
+    return { id: existing.id, updated: true };
+  }
+  const inserted = await db.insert(favoritePeriodRanges).values(input);
+  return { id: Number(inserted[0].insertId), updated: false };
+}
+
+export async function deleteFavoritePeriodRange(userId: number, id: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  await db.delete(favoritePeriodRanges).where(and(eq(favoritePeriodRanges.id, id), eq(favoritePeriodRanges.userId, userId)));
+  return { success: true };
 }

@@ -6,9 +6,9 @@ import { protectedProcedure, publicProcedure, roleProcedure, router } from "./_c
 import { listHeartbeatJobs, updateHeartbeatJob } from "./_core/heartbeat";
 import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
-import { getBranchById, getBranchProfile, getDashboardSummary, getInventoryMovementAnalysis, getOperationsOverview, listBranches, getDb } from "./db";
+import { getBranchById, getBranchProfile, getDashboardSummary, getInventoryMovementAnalysis, getOperationsOverview, listBranches, getDb, listFavoritePeriodRanges, saveFavoritePeriodRange, deleteFavoritePeriodRange } from "./db";
 import { retryCommandUsageDigest, retryScheduledReportDelivery } from "./scheduled";
-import { branches, regions, branchAssets, branchFinancialSnapshots, checklistItems, checklistTemplates, correctiveActions, dashboardPreferences, documentVersions, documents, internalRequests, maintenanceTickets, qualityCases, tasks, users, userBranchPermissions, reportShareLogs, visitChecklistResults, visits, auditLogs, notifications, reportApprovals, scheduledReportRecipients, scheduledReportDeliveries, costCenterMappings, inventoryMovementSnapshots } from "../drizzle/schema";
+import { branches, regions, branchAssets, branchFinancialSnapshots, favoritePeriodRanges, checklistItems, checklistTemplates, correctiveActions, dashboardPreferences, documentVersions, documents, internalRequests, maintenanceTickets, qualityCases, tasks, users, userBranchPermissions, reportShareLogs, visitChecklistResults, visits, auditLogs, notifications, reportApprovals, scheduledReportRecipients, scheduledReportDeliveries, costCenterMappings, inventoryMovementSnapshots } from "../drizzle/schema";
 import { aggregateFinancialComparison } from "../shared/financials";
 import { invokeLLM } from "./_core/llm";
 
@@ -35,6 +35,22 @@ export const appRouter = router({
     }),
   }),
   dashboard: router({
+    favoritePeriods: router({
+      list: protectedProcedure.query(({ ctx }) => listFavoritePeriodRanges(ctx.user.id)),
+      save: protectedProcedure.input(z.object({ name: z.string().trim().min(2).max(120), fromDate: z.string().date(), toDate: z.string().date() })).mutation(async ({ ctx, input }) => {
+        if (input.fromDate > input.toDate) throw new TRPCError({ code: "BAD_REQUEST", message: "بداية النطاق يجب أن تسبق نهايته." });
+        const result = await saveFavoritePeriodRange({ userId: ctx.user.id, ...input });
+        const db = await getDb();
+        if (db) await recordAudit(db, { actorId: ctx.user.id, entityType: "dashboard_period", action: result.updated ? "favorite_period_updated" : "favorite_period_created", afterData: input });
+        return result;
+      }),
+      remove: protectedProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
+        const result = await deleteFavoritePeriodRange(ctx.user.id, input.id);
+        const db = await getDb();
+        if (db) await recordAudit(db, { actorId: ctx.user.id, entityType: "dashboard_period", entityId: input.id, action: "favorite_period_deleted" });
+        return result;
+      }),
+    }),
     summary: protectedProcedure.input(z.object({ from: z.string().date().optional(), to: z.string().date().optional() }).optional()).query(({ ctx, input }) => {
       if (input?.from && input?.to && input.from > input.to) throw new TRPCError({ code: "BAD_REQUEST", message: "الفترة الزمنية غير صحيحة." });
       return getDashboardSummary(ctx.user, { from: input?.from ? new Date(`${input.from}T00:00:00.000Z`) : undefined, to: input?.to ? new Date(`${input.to}T23:59:59.999Z`) : undefined });
