@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { aggregateFinancialComparison, calculateNetMargin } from "../shared/financials";
+import { aggregateFinancialComparison, calculateNetMargin, filterSalesCenters } from "../shared/financials";
 
 describe("calculateNetMargin", () => {
   it("subtracts sales and cost returns before calculating the net margin", () => {
@@ -25,6 +25,17 @@ describe("calculateNetMargin", () => {
       netCost: 0,
       netProfitMargin: 0,
     });
+  });
+});
+
+describe("filterSalesCenters", () => {
+  it("excludes warehouses and representatives from sales rankings", () => {
+    expect(filterSalesCenters([
+      { id: 101, operationalType: "branch" },
+      { id: 102, operationalType: "warehouse" },
+      { id: 103, operationalType: "representative" },
+      { id: 104 },
+    ]).map((location) => location.id)).toEqual([101, 104]);
   });
 });
 

@@ -194,8 +194,8 @@ export async function getOperationsOverview(user: Pick<User, "id" | "role" | "re
     trendMap.set(key, current);
   }
   const financialTrend = Array.from(trendMap.values()).sort((a, b) => a.period.localeCompare(b.period)).slice(-12);
-  const branchFinancialMap = new Map<number, { id: number; name: string; city: string; januaryRevenue: number | null; februaryRevenue: number | null; januaryProfit: number | null; februaryProfit: number | null }>();
-  for (const branch of visible) branchFinancialMap.set(branch.id, { id: branch.id, name: branch.name, city: branch.city, januaryRevenue: null, februaryRevenue: null, januaryProfit: null, februaryProfit: null });
+  const branchFinancialMap = new Map<number, { id: number; name: string; city: string; operationalType: string; januaryRevenue: number | null; februaryRevenue: number | null; januaryProfit: number | null; februaryProfit: number | null }>();
+  for (const branch of visible) branchFinancialMap.set(branch.id, { id: branch.id, name: branch.name, city: branch.city, operationalType: branch.operationalType ?? "branch", januaryRevenue: null, februaryRevenue: null, januaryProfit: null, februaryProfit: null });
   for (const row of visibleFinancialRows) {
     const item = branchFinancialMap.get(row.branchId); if (!item) continue;
     if (row.periodYear === 2026 && row.periodMonth === 1) { item.januaryRevenue = Number(row.revenue ?? 0); item.januaryProfit = Number(row.netProfit ?? 0); }
