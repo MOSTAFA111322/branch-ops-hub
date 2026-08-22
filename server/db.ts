@@ -188,7 +188,15 @@ export async function getOperationsOverview(user: Pick<User, "id" | "role" | "re
     trendMap.set(key, current);
   }
   const financialTrend = Array.from(trendMap.values()).sort((a, b) => a.period.localeCompare(b.period)).slice(-12);
-  return { comparison, financialTrend, visits: visitsRows, actions: actionRows, documents: documentRows, qualityCases: qualityRows, qualityAnalysis, operationalSummary, previousOperationalSummary, operationalComparison, dataQuality, qualitySummary, maintenanceTickets: maintenanceRows, requests: scopedRequests, tasks: scopedTasks, tasksAndRequests: [...scopedTasks, ...scopedRequests] };
+  const branchFinancialMap = new Map<number, { id: number; name: string; city: string; januaryRevenue: number | null; februaryRevenue: number | null; januaryProfit: number | null; februaryProfit: number | null }>();
+  for (const branch of visible) branchFinancialMap.set(branch.id, { id: branch.id, name: branch.name, city: branch.city, januaryRevenue: null, februaryRevenue: null, januaryProfit: null, februaryProfit: null });
+  for (const row of visibleFinancialRows) {
+    const item = branchFinancialMap.get(row.branchId); if (!item) continue;
+    if (row.periodYear === 2026 && row.periodMonth === 1) { item.januaryRevenue = Number(row.revenue ?? 0); item.januaryProfit = Number(row.netProfit ?? 0); }
+    if (row.periodYear === 2026 && row.periodMonth === 2) { item.februaryRevenue = Number(row.revenue ?? 0); item.februaryProfit = Number(row.netProfit ?? 0); }
+  }
+  const financialByBranch = Array.from(branchFinancialMap.values()).map((item) => ({ ...item, revenueChangePercent: item.januaryRevenue ? Math.round(((item.februaryRevenue ?? 0) - item.januaryRevenue) / item.januaryRevenue * 1000) / 10 : null, profitChangePercent: item.januaryProfit ? Math.round(((item.februaryProfit ?? 0) - item.januaryProfit) / item.januaryProfit * 1000) / 10 : null }));
+  return { comparison, financialTrend, financialByBranch, visits: visitsRows, actions: actionRows, documents: documentRows, qualityCases: qualityRows, qualityAnalysis, operationalSummary, previousOperationalSummary, operationalComparison, dataQuality, qualitySummary, maintenanceTickets: maintenanceRows, requests: scopedRequests, tasks: scopedTasks, tasksAndRequests: [...scopedTasks, ...scopedRequests] };
 }
 
 export async function getDashboardSummary(user: Pick<User, "id" | "role" | "regionId" | "branchId">) {

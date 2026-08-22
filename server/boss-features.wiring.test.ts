@@ -39,6 +39,15 @@ describe("Boss-level operational extensions", () => {
     expect(source).toContain("تصدير PDF");
   });
 
+  it("wires comparison Excel export, item summary state, and branch notes", () => {
+    const source = readFileSync(resolve(process.cwd(), "client/src/pages/Home.tsx"), "utf8");
+    expect(source).toContain("مقارنة-يناير-فبراير-2026.xlsx");
+    expect(source).toContain("حسب الصنف");
+    expect(source).toContain("أفضل وأقل 3 أصناف");
+    expect(source).toContain("branchNotes");
+    expect(source).toContain("الملاحظة");
+  });
+
   it("wires official PDF header, percentage tooltips, and persisted filters", () => {
     const source = readFileSync(resolve(process.cwd(), "client/src/pages/Home.tsx"), "utf8");
     const styles = readFileSync(resolve(process.cwd(), "client/src/index.css"), "utf8");
