@@ -41,23 +41,41 @@ export const appRouter = router({
     ask: roleProcedure(["admin", "area_manager"]).input(z.object({
       question: z.string().trim().min(2).max(1200),
       history: z.array(z.object({ role: z.enum(["user", "assistant"]), content: z.string().max(4000) })).max(12).default([]),
+      branchId: z.number().int().positive().optional(),
+      period: z.enum(["day", "week", "month"]).default("month"),
+      from: z.string().date().optional(),
+      to: z.string().date().optional(),
     })).mutation(async ({ input, ctx }) => {
-      const overview = await getOperationsOverview(ctx.user);
+      if (input.from && input.to && input.from > input.to) throw new TRPCError({ code: "BAD_REQUEST", message: "الفترة الزمنية غير صحيحة." });
+      const visibleBranches = await listBranches(ctx.user);
+      const selectedBranch = input.branchId ? visibleBranches.find((branch) => branch.id === input.branchId) : undefined;
+      if (input.branchId && !selectedBranch) throw new TRPCError({ code: "FORBIDDEN", message: "لا تملك صلاحية الوصول إلى هذا الفرع." });
+      const overview = await getOperationsOverview(ctx.user, input.period);
+      const fromDate = input.from ? new Date(`${input.from}T00:00:00.000Z`) : undefined;
+      const toDate = input.to ? new Date(`${input.to}T23:59:59.999Z`) : undefined;
+      const inScope = (row: any) => (!input.branchId || row.branchId === input.branchId) && (!fromDate || !row.createdAt || new Date(row.createdAt).getTime() >= fromDate.getTime()) && (!toDate || !row.createdAt || new Date(row.createdAt).getTime() <= toDate.getTime());
+      const scopedRows = (rows: any[] | undefined) => (rows ?? []).filter(inScope);
       const context = JSON.stringify({
+        scope: { branchId: input.branchId ?? null, branchName: selectedBranch?.name ?? "كل الفروع", period: input.period, from: input.from ?? null, to: input.to ?? null },
         financialTrend: overview.financialTrend,
-        financialByBranch: overview.financialByBranch,
+        financialByBranch: input.branchId ? overview.financialByBranch?.filter((item: any) => item.id === input.branchId) : overview.financialByBranch,
         operationalSummary: overview.operationalSummary,
         operationalComparison: overview.operationalComparison,
         qualityAnalysis: overview.qualityAnalysis,
-        dataQuality: overview.dataQuality,
-        openActions: overview.tasksAndRequests?.filter((item: any) => item.status !== "done" && item.status !== "completed").length ?? 0,
+        dataQuality: input.branchId ? overview.dataQuality?.filter((item: any) => item.branchId === input.branchId) : overview.dataQuality,
+        visits: scopedRows(overview.visits),
+        actions: scopedRows(overview.actions),
+        qualityCases: scopedRows(overview.qualityCases),
+        maintenanceTickets: scopedRows(overview.maintenanceTickets),
+        tasksAndRequests: scopedRows(overview.tasksAndRequests),
+        openActions: scopedRows(overview.tasksAndRequests).filter((item: any) => item.status !== "done" && item.status !== "completed").length,
       });
       const response = await invokeLLM({
         model: "gpt-5-mini",
         reasoning: { effort: "minimal" },
         maxTokens: 900,
         messages: [
-          { role: "system", content: "أنت مساعد عمليات وتحليل مالي لمدير منطقة في شركة محامص سعودية. أجب بالعربية وبأسلوب مهني مختصر. استخدم الأرقام الواردة فقط، ولا تخترع بيانات أو تقييمات. اربط كل توصية بمؤشر واضح، واذكر عندما لا تكفي البيانات للإجابة. لا تكشف بيانات مستخدمين أو أسرار النظام." },
+          { role: "system", content: "أنت مساعد عمليات وتحليل مالي لمدير منطقة في شركة محامص سعودية. أجب بالعربية وبأسلوب مهني مختصر. ابدأ إجابتك بذكر نطاق التحليل الحالي إذا كان محددًا (اسم الفرع والفترة)، ولا تستخدم بيانات خارج هذا النطاق. استخدم الأرقام الواردة فقط، ولا تخترع بيانات أو تقييمات. اربط كل توصية بمؤشر واضح، واذكر عندما لا تكفي البيانات للإجابة. لا تكشف بيانات مستخدمين أو أسرار النظام." },
           { role: "user", content: `بيانات لوحة المستخدم الحالية (JSON): ${context}` },
           ...input.history,
           { role: "user", content: input.question },
