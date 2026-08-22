@@ -51,4 +51,11 @@ describe("inventory automation wiring", () => {
     expect(db).toContain("inventory_low");
     expect(home).toContain("dashboardAlerts");
   });
+
+  it("keeps a reusable report history and limits exports to permitted branches", () => {
+    expect(comparison).toContain("branch-ops-comparison-reports");
+    expect(comparison).toContain("shareReport");
+    expect(comparison).toContain("تظهر هنا الفروع المسموح لك بالوصول إليها فقط");
+    expect(home).toContain("list");
+  });
 });
