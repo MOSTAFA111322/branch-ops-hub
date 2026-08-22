@@ -192,7 +192,7 @@ export const appRouter = router({
     adminList: roleProcedure(["admin"]).query(async () => {
       const db = await getDb();
       if (!db) throw new Error("Database unavailable");
-      return db.select({ id: users.id, openId: users.openId, name: users.name, email: users.email, role: users.role, regionId: users.regionId, branchId: users.branchId, createdAt: users.createdAt, lastSignedIn: users.lastSignedIn }).from(users).orderBy(users.name).limit(500);
+      return db.select({ id: users.id, openId: users.openId, name: users.name, email: users.email, role: users.role, regionId: users.regionId, branchId: users.branchId, isActive: users.isActive, createdAt: users.createdAt, lastSignedIn: users.lastSignedIn }).from(users).orderBy(users.name).limit(500);
     }),
     updateAccess: roleProcedure(["admin"]).input(z.object({
       userId: z.number().int().positive(),
@@ -200,13 +200,14 @@ export const appRouter = router({
       role: z.enum(["user", "admin", "area_manager", "branch_manager", "quality", "maintenance", "warehouse", "factory"]),
       regionId: z.number().int().positive().nullable().optional(),
       branchId: z.number().int().positive().nullable().optional(),
+      isActive: z.boolean().optional(),
     })).mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new Error("Database unavailable");
-      const [current] = await db.select({ id: users.id, name: users.name, role: users.role, regionId: users.regionId, branchId: users.branchId }).from(users).where(eq(users.id, input.userId)).limit(1);
+      const [current] = await db.select({ id: users.id, name: users.name, role: users.role, regionId: users.regionId, branchId: users.branchId, isActive: users.isActive }).from(users).where(eq(users.id, input.userId)).limit(1);
       if (!current) throw new TRPCError({ code: "NOT_FOUND", message: "حساب المستخدم غير موجود" });
       if (input.userId === ctx.user.id && input.role !== "admin") throw new TRPCError({ code: "BAD_REQUEST", message: "لا يمكن لمدير النظام خفض صلاحية حسابه الذاتي" });
-      await db.update(users).set({ name: input.name, role: input.role, regionId: input.regionId, branchId: input.branchId }).where(eq(users.id, input.userId));
+      await db.update(users).set({ name: input.name, role: input.role, regionId: input.regionId, branchId: input.branchId, ...(input.isActive === undefined ? {} : { isActive: input.isActive }) }).where(eq(users.id, input.userId));
       await recordAudit(db, { actorId: ctx.user.id, entityType: "user_access", entityId: input.userId, action: "update", beforeData: current, afterData: input });
       return { success: true };
     }),
