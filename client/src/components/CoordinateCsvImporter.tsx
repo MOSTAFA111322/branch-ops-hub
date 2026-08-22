@@ -3,27 +3,49 @@ import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Upload, CheckCircle2, AlertTriangle } from "lucide-react";
+import { Upload, CheckCircle2, AlertTriangle, Loader2 } from "lucide-react";
 
 type CoordinateRow = { code: string; latitude: number; longitude: number; coordinateSource: string };
 const aliases: Record<string, keyof CoordinateRow> = { code: "code", branchcode: "code", "رمز الفرع": "code", الرمز: "code", latitude: "latitude", lat: "latitude", "خط العرض": "latitude", longitude: "longitude", lng: "longitude", lon: "longitude", "خط الطول": "longitude", source: "coordinateSource", coordinatesource: "coordinateSource", المصدر: "coordinateSource" };
 
-function parseCsv(text: string) {
-  const lines = text.replace(/^\uFEFF/, "").split(/\r?\n/).map(line => line.trim()).filter(Boolean);
-  if (lines.length < 2) throw new Error("يجب أن يحتوي الملف على صف عناوين وصف واحد على الأقل.");
+type Parsed = { rows: CoordinateRow[]; errors: string[] };
+const clean = (value: string) => value.trim().replace(/^"|"$/g, "");
+
+async function parseCsv(text: string, onProgress: (value: number) => void): Promise<Parsed> {
+  const lines = text.replace(/^\uFEFF/, "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (lines.length < 2) throw new Error("الملف لا يحتوي على صفوف بيانات؛ يجب إضافة صف عناوين وصف واحد على الأقل.");
   const delimiter = lines[0].includes(";") ? ";" : ",";
-  const headers = lines[0].split(delimiter).map(value => value.trim().toLowerCase());
-  const mapped = headers.map(header => aliases[header]);
-  if (!mapped.includes("code") || !mapped.includes("latitude") || !mapped.includes("longitude")) throw new Error("الرؤوس المطلوبة: رمز الفرع، خط العرض، خط الطول.");
+  const headers = lines[0].split(delimiter).map((value) => clean(value).toLowerCase());
+  const mapped = headers.map((header) => aliases[header]);
+  if (!mapped.includes("code")) throw new Error("العمود المفقود: رمز الفرع أو code.");
+  if (!mapped.includes("latitude")) throw new Error("العمود المفقود: خط العرض أو latitude.");
+  if (!mapped.includes("longitude")) throw new Error("العمود المفقود: خط الطول أو longitude.");
   const rows: CoordinateRow[] = [];
   const errors: string[] = [];
-  lines.slice(1).forEach((line, index) => {
-    const cells = line.split(delimiter).map(value => value.trim().replace(/^\"|\"$/g, ""));
-    const record: Record<string, string | number | undefined> = {};
-    mapped.forEach((key, cellIndex) => { if (key) record[key] = key === "code" || key === "coordinateSource" ? cells[cellIndex] : Number(cells[cellIndex]?.replace(",", ".")); });
-    if (!record.code || !Number.isFinite(record.latitude) || !Number.isFinite(record.longitude) || Number(record.latitude) < -90 || Number(record.latitude) > 90 || Number(record.longitude) < -180 || Number(record.longitude) > 180) errors.push(`السطر ${index + 2}: بيانات غير صالحة`);
-    else rows.push({ code: String(record.code), latitude: Number(record.latitude), longitude: Number(record.longitude), coordinateSource: String(record.coordinateSource || "CSV") });
-  });
+  for (let index = 0; index < lines.length - 1; index += 1) {
+    const lineNumber = index + 2;
+    const cells = lines[index + 1].split(delimiter).map(clean);
+    const codeIndex = mapped.indexOf("code");
+    const latitudeIndex = mapped.indexOf("latitude");
+    const longitudeIndex = mapped.indexOf("longitude");
+    const sourceIndex = mapped.indexOf("coordinateSource");
+    const code = cells[codeIndex] ?? "";
+    const latitudeText = cells[latitudeIndex] ?? "";
+    const longitudeText = cells[longitudeIndex] ?? "";
+    const latitude = Number(latitudeText.replace(",", "."));
+    const longitude = Number(longitudeText.replace(",", "."));
+    const source = sourceIndex >= 0 ? cells[sourceIndex] || "CSV" : "CSV";
+    const reasons: string[] = [];
+    if (!code) reasons.push("رمز الفرع فارغ");
+    if (!latitudeText || !Number.isFinite(latitude)) reasons.push("خط العرض ليس رقمًا");
+    else if (latitude < -90 || latitude > 90) reasons.push("خط العرض خارج النطاق -90 إلى 90");
+    if (!longitudeText || !Number.isFinite(longitude)) reasons.push("خط الطول ليس رقمًا");
+    else if (longitude < -180 || longitude > 180) reasons.push("خط الطول خارج النطاق -180 إلى 180");
+    if (reasons.length) errors.push(`السطر ${lineNumber}: ${reasons.join("، ")}`);
+    else rows.push({ code, latitude, longitude, coordinateSource: source });
+    onProgress(Math.round(((index + 1) / (lines.length - 1)) * 100));
+    if (index % 25 === 0) await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+  }
   return { rows, errors };
 }
 
@@ -32,9 +54,18 @@ export function CoordinateCsvImporter() {
   const [rows, setRows] = useState<CoordinateRow[]>([]);
   const [errors, setErrors] = useState<string[]>([]);
   const [message, setMessage] = useState("");
-  const mutation = trpc.branches.importCoordinates.useMutation({ onSuccess: result => setMessage(`تم تحديث ${result.updated} فرع، ورفض ${result.rejected} صف.`), onError: error => setMessage(error.message) });
-  const duplicateCodes = useMemo(() => rows.length - new Set(rows.map(row => row.code)).size, [rows]);
-  const loadFile = (file: File) => { const reader = new FileReader(); reader.onload = event => { try { const parsed = parseCsv(String(event.target?.result || "")); setRows(parsed.rows); setErrors([...parsed.errors, ...(parsed.rows.length - new Set(parsed.rows.map(row => row.code)).size ? ["يوجد تكرار في رموز الفروع وسيتم إرسال آخر نسخة فقط."] : [])]); setMessage(""); } catch (error) { setRows([]); setErrors([error instanceof Error ? error.message : "تعذر قراءة الملف"]); } }; reader.readAsText(file, "UTF-8"); };
-  const submit = () => { const unique = Array.from(new Map(rows.map(row => [row.code, row])).values()); mutation.mutate({ rows: unique }); };
-  return <Card className="rounded-2xl border-[#dfe9df] bg-white"><CardHeader><CardTitle className="flex items-center gap-2 text-base"><Upload className="h-4 w-4 text-[#2d7d58]" /> استيراد إحداثيات الفروع من CSV</CardTitle><p className="text-xs text-[#89948b]">يتم التحقق من النطاق الجغرافي وتطبيق التحديث على الفروع المسموح بها فقط.</p></CardHeader><CardContent className="space-y-4"><input ref={inputRef} type="file" accept=".csv,text/csv" className="hidden" onChange={event => event.target.files?.[0] && loadFile(event.target.files[0])} /><Button variant="outline" className="rounded-xl" onClick={() => inputRef.current?.click()}>اختيار ملف CSV</Button>{rows.length > 0 && <div className="overflow-x-auto rounded-xl border border-[#e5eee6]"><table className="w-full text-right text-xs"><thead className="bg-[#f8fbf8]"><tr><th className="p-2">الرمز</th><th className="p-2">خط العرض</th><th className="p-2">خط الطول</th><th className="p-2">المصدر</th></tr></thead><tbody>{rows.slice(0, 8).map(row => <tr key={row.code} className="border-t border-[#edf1ed]"><td className="p-2">{row.code}</td><td className="p-2">{row.latitude}</td><td className="p-2">{row.longitude}</td><td className="p-2">{row.coordinateSource}</td></tr>)}</tbody></table></div>}{rows.length > 8 && <p className="text-[10px] text-[#89948b]">تظهر معاينة أول 8 صفوف من أصل {rows.length}.</p>}{duplicateCodes > 0 && <Badge variant="outline" className="border-[#ead8a8] text-[#ad7a27]">تكرارات: {duplicateCodes} — سيُستخدم آخر صف لكل رمز</Badge>}{errors.length > 0 && <div className="rounded-xl bg-[#fff8f4] p-3 text-xs text-[#925e43]"><AlertTriangle className="ml-1 inline h-3.5 w-3.5" />{errors.join("؛ ")}</div>}<div className="flex flex-wrap items-center gap-2"><Button className="rounded-xl bg-[#2d7d58] hover:bg-[#256648]" disabled={!rows.length || mutation.isPending} onClick={submit}>{mutation.isPending ? "جارٍ التحديث..." : "معاينة واعتماد الإحداثيات"}</Button>{message && <span className="text-xs text-[#2d7d58]"><CheckCircle2 className="ml-1 inline h-3.5 w-3.5" />{message}</span>}</div></CardContent></Card>;
+  const [progress, setProgress] = useState(0);
+  const [reading, setReading] = useState(false);
+  const mutation = trpc.branches.importCoordinates.useMutation({ onSuccess: (result) => setMessage(`تم تحديث ${result.updated} فرع، ورفض ${result.rejected} صف.`), onError: (error) => setMessage(error.message) });
+  const duplicateCodes = useMemo(() => rows.length - new Set(rows.map((row) => row.code)).size, [rows]);
+  const loadFile = (file: File) => {
+    setReading(true); setProgress(0); setRows([]); setErrors([]); setMessage("");
+    const reader = new FileReader();
+    reader.onerror = () => { setReading(false); setErrors(["تعذر قراءة الملف من الجهاز؛ تحقق من صلاحية الملف ثم حاول مرة أخرى."]); };
+    reader.onload = (event) => { void parseCsv(String(event.target?.result || ""), setProgress).then((parsed) => { setRows(parsed.rows); setErrors([...parsed.errors, ...(parsed.rows.length - new Set(parsed.rows.map((row) => row.code)).size ? ["توجد رموز فروع مكررة؛ سيُستخدم آخر صف لكل رمز عند الاعتماد."] : [])]); }).catch((error) => setErrors([error instanceof Error ? error.message : "تعذر تحليل ملف CSV."])).finally(() => setReading(false)); };
+    reader.readAsText(file, "UTF-8");
+  };
+  const submit = () => { const unique = Array.from(new Map(rows.map((row) => [row.code, row])).values()); mutation.mutate({ rows: unique }); };
+  return <Card className="rounded-2xl border-[#dfe9df] bg-white"><CardHeader><CardTitle className="flex items-center gap-2 text-base"><Upload className="h-4 w-4 text-[#2d7d58]" /> استيراد إحداثيات الفروع من CSV</CardTitle><p className="text-xs text-[#89948b]">تظهر نتيجة كل صف مرفوض برقم السطر وسبب الرفض قبل الاعتماد.</p></CardHeader><CardContent className="space-y-4"><input ref={inputRef} type="file" accept=".csv,text/csv" className="hidden" onChange={(event) => event.target.files?.[0] && loadFile(event.target.files[0])} /><Button variant="outline" className="rounded-xl" disabled={reading || mutation.isPending} onClick={() => inputRef.current?.click()}>{reading ? <><Loader2 className="ml-1 h-3.5 w-3.5 animate-spin" />جارٍ تحليل الملف...</> : "اختيار ملف CSV"}</Button>{(reading || progress > 0) && <div className="space-y-1" aria-live="polite"><div className="flex justify-between text-[10px] text-[#6b8172]"><span>{reading ? "تحليل الصفوف والتحقق من الإحداثيات" : "اكتملت المعاينة"}</span><span>{progress}%</span></div><div className="h-2 overflow-hidden rounded-full bg-[#eaf1eb]"><div className="h-full rounded-full bg-[#2d7d58] transition-[width] duration-150" style={{ width: `${progress}%` }} /></div></div>}{rows.length > 0 && <div className="overflow-x-auto rounded-xl border border-[#e5eee6]"><table className="w-full text-right text-xs"><thead className="bg-[#f8fbf8]"><tr><th className="p-2">الرمز</th><th className="p-2">خط العرض</th><th className="p-2">خط الطول</th><th className="p-2">المصدر</th></tr></thead><tbody>{rows.slice(0, 8).map((row) => <tr key={row.code} className="border-t border-[#edf1ed]"><td className="p-2">{row.code}</td><td className="p-2">{row.latitude}</td><td className="p-2">{row.longitude}</td><td className="p-2">{row.coordinateSource}</td></tr>)}</tbody></table></div>}{rows.length > 8 && <p className="text-[10px] text-[#89948b]">تظهر معاينة أول 8 صفوف من أصل {rows.length}.</p>}{duplicateCodes > 0 && <Badge variant="outline" className="border-[#ead8a8] text-[#ad7a27]">تكرارات: {duplicateCodes} — سيُستخدم آخر صف لكل رمز</Badge>}{errors.length > 0 && <div className="max-h-40 overflow-auto rounded-xl bg-[#fff8f4] p-3 text-xs text-[#925e43]" role="alert"><AlertTriangle className="ml-1 inline h-3.5 w-3.5" /><div className="mt-1 space-y-1">{errors.map((error, index) => <p key={`${error}-${index}`}>{error}</p>)}</div></div>}<div className="flex flex-wrap items-center gap-2"><Button className="rounded-xl bg-[#2d7d58] hover:bg-[#256648]" disabled={!rows.length || reading || mutation.isPending} onClick={submit}>{mutation.isPending ? "جارٍ التحديث..." : "اعتماد الإحداثيات الصالحة"}</Button>{message && <span className="text-xs text-[#2d7d58]"><CheckCircle2 className="ml-1 inline h-3.5 w-3.5" />{message}</span>}</div></CardContent></Card>;
 }
+export default CoordinateCsvImporter;
