@@ -48,6 +48,11 @@ describe("Boss-level operational extensions", () => {
     expect(source).toContain("تغير المبيعات");
     expect(source).toContain("localStorage.setItem(\"branchhub.managerHealthFilter\"");
     expect(source).toContain("localStorage.setItem(\"branchhub.managerTargetFilter\"");
+    expect(source).toContain("managerFilterProfiles");
+    expect(source).toContain("saveManagerFilterProfile");
+    expect(source).toContain("applyManagerFilterProfile");
+    expect(source).toContain("removeManagerFilterProfile");
+    expect(source).toContain("ملفات العرض المحفوظة");
     expect(styles).toContain("@media print");
   });
 });
