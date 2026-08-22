@@ -9,6 +9,7 @@ import { TRPCError } from "@trpc/server";
 import { getBranchById, getBranchProfile, getDashboardSummary, getOperationsOverview, listBranches, getDb } from "./db";
 import { retryCommandUsageDigest, retryScheduledReportDelivery } from "./scheduled";
 import { branches, regions, branchAssets, branchFinancialSnapshots, checklistItems, checklistTemplates, correctiveActions, dashboardPreferences, documentVersions, documents, internalRequests, maintenanceTickets, qualityCases, tasks, users, visitChecklistResults, visits, auditLogs, notifications, reportApprovals, scheduledReportRecipients, scheduledReportDeliveries, costCenterMappings } from "../drizzle/schema";
+import { aggregateFinancialComparison } from "../shared/financials";
 
 async function recordAudit(db: any, input: { actorId?: number; branchId?: number; entityType: string; entityId?: number; action: string; beforeData?: unknown; afterData?: unknown }) {
   await db.insert(auditLogs).values({
@@ -250,6 +251,17 @@ export const appRouter = router({
         const snapshot = rows.find(row => row.branchId === branch.id && row.periodYear === input.year && row.periodMonth === input.month);
         return { branchId: branch.id, branchName: branch.name, operationalType: branch.operationalType, salesCenter: branch.operationalType === "branch", netSales: Number(snapshot?.netSales ?? snapshot?.revenue ?? 0), netCost: Number(snapshot?.netCost ?? snapshot?.costOfGoods ?? 0), netProfitMargin: Number(snapshot?.netProfitMargin ?? 0), operatingExpenses: Number(snapshot?.operatingExpenses ?? 0), netProfit: Number(snapshot?.netProfit ?? 0) };
       });
+    }),
+    monthlyComparison: roleProcedure(["admin", "area_manager", "branch_manager"]).input(z.object({ year: z.number().int().min(2000).max(2200), month: z.number().int().min(1).max(12) })).query(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      const visibleBranches = await listBranches(ctx.user);
+      const ids = visibleBranches.map(branch => branch.id);
+      if (!ids.length) return { current: { year: input.year, month: input.month }, previous: { year: input.month === 1 ? input.year - 1 : input.year, month: input.month === 1 ? 12 : input.month - 1 }, rows: [] };
+      const previous = input.month === 1 ? { year: input.year - 1, month: 12 } : { year: input.year, month: input.month - 1 };
+      const snapshots = await db.select().from(branchFinancialSnapshots).where(inArray(branchFinancialSnapshots.branchId, ids));
+      const rows = aggregateFinancialComparison(visibleBranches, snapshots, input, previous);
+      return { current: input, previous, rows };
     }),
     upsert: roleProcedure(["admin", "area_manager", "branch_manager"]).input(z.object({ branchId: z.number().int().positive(), year: z.number().int().min(2000).max(2200), month: z.number().int().min(1).max(12), revenue: z.number().min(0), salesReturns: z.number().min(0).default(0), costOfGoods: z.number().min(0), costReturns: z.number().min(0).default(0), operatingExpenses: z.number().min(0), notes: z.string().max(2000).optional() })).mutation(async ({ input, ctx }) => {
       const db = await getDb();

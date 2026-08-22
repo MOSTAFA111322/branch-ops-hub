@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculateNetMargin } from "../shared/financials";
+import { aggregateFinancialComparison, calculateNetMargin } from "../shared/financials";
 
 describe("calculateNetMargin", () => {
   it("subtracts sales and cost returns before calculating the net margin", () => {
@@ -25,5 +25,24 @@ describe("calculateNetMargin", () => {
       netCost: 0,
       netProfitMargin: 0,
     });
+  });
+});
+
+describe("aggregateFinancialComparison", () => {
+  it("compares current month with previous month by cost center type", () => {
+    const rows = aggregateFinancialComparison(
+      [{ id: 1, operationalType: "branch" }, { id: 2, operationalType: "warehouse" }, { id: 3, operationalType: "representative" }],
+      [
+        { branchId: 1, periodYear: 2026, periodMonth: 1, operatingExpenses: "120", netSales: "1000", netProfit: "300" },
+        { branchId: 1, periodYear: 2025, periodMonth: 12, operatingExpenses: "100", netSales: "900", netProfit: "250" },
+        { branchId: 2, periodYear: 2026, periodMonth: 1, operatingExpenses: "80", revenue: "0", netProfit: "-80" },
+        { branchId: 2, periodYear: 2025, periodMonth: 12, operatingExpenses: "100", revenue: "0", netProfit: "-100" },
+      ],
+      { year: 2026, month: 1 },
+      { year: 2025, month: 12 },
+    );
+    expect(rows[0]).toMatchObject({ type: "branch", locationCount: 1, expenseChange: 20, expenseChangePercent: 20 });
+    expect(rows[1]).toMatchObject({ type: "warehouse", locationCount: 1, current: { expenses: 80, netProfit: -80 }, previous: { expenses: 100 } });
+    expect(rows[2]).toMatchObject({ type: "representative", locationCount: 1, expenseChange: 0, expenseChangePercent: 0 });
   });
 });
