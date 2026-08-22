@@ -33,7 +33,7 @@ describe("Boss-level operational extensions", () => {
     const source = readFileSync(resolve(process.cwd(), "client/src/pages/Home.tsx"), "utf8");
     expect(source).toContain("managerHealthFilter");
     expect(source).toContain("managerTargetFilter");
-    expect(source).toContain("financialJanFeb");
+    expect(source).toContain("financialComparison");
     expect(source).toContain("BarChart");
     expect(source).toContain("exportAreaManagerPdf");
     expect(source).toContain("تصدير PDF");
@@ -41,7 +41,7 @@ describe("Boss-level operational extensions", () => {
 
   it("wires comparison Excel export, item summary state, and branch notes", () => {
     const source = readFileSync(resolve(process.cwd(), "client/src/pages/Home.tsx"), "utf8");
-    expect(source).toContain("مقارنة-يناير-فبراير-2026.xlsx");
+    expect(source).toContain("`مقارنة-${currentLabel}-${previousLabel}.xlsx`");
     expect(source).toContain("حسب الصنف");
     expect(source).toContain("أفضل وأقل 3 أصناف");
     expect(source).toContain("branchNotes");
@@ -54,6 +54,7 @@ describe("Boss-level operational extensions", () => {
     expect(source).toContain("VITE_APP_LOGO");
     expect(source).toContain("شعار الشركة");
     expect(source).toContain("revenueChangePercent");
+    expect(source).toContain("financialPeriodLabels");
     expect(source).toContain("تغير المبيعات");
     expect(source).toContain("localStorage.setItem(\"branchhub.managerHealthFilter\"");
     expect(source).toContain("localStorage.setItem(\"branchhub.managerTargetFilter\"");

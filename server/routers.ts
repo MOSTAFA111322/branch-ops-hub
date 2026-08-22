@@ -76,6 +76,8 @@ export const appRouter = router({
       branchId: z.number().int().positive().optional(),
       itemQuery: z.string().trim().max(160).optional(),
       period: z.enum(["day", "week", "month"]).default("month"),
+      year: z.number().int().min(2000).max(2200).optional(),
+      month: z.number().int().min(1).max(12).optional(),
       from: z.string().date().optional(),
       to: z.string().date().optional(),
     })).mutation(async ({ input, ctx }) => {
@@ -83,7 +85,7 @@ export const appRouter = router({
       const visibleBranches = await listBranches(ctx.user);
       const selectedBranch = input.branchId ? visibleBranches.find((branch) => branch.id === input.branchId) : undefined;
       if (input.branchId && !selectedBranch) throw new TRPCError({ code: "FORBIDDEN", message: "لا تملك صلاحية الوصول إلى هذا الفرع." });
-      const overview = await getOperationsOverview(ctx.user, input.period);
+      const overview = await getOperationsOverview(ctx.user, input.period, undefined, input.year, input.month);
       const inventoryMovement = await getInventoryMovementAnalysis(ctx.user, { itemQuery: input.itemQuery, branchId: input.branchId, from: input.from ? new Date(`${input.from}T00:00:00.000Z`) : undefined, to: input.to ? new Date(`${input.to}T23:59:59.999Z`) : undefined });
       const fromDate = input.from ? new Date(`${input.from}T00:00:00.000Z`) : undefined;
       const toDate = input.to ? new Date(`${input.to}T23:59:59.999Z`) : undefined;
@@ -641,7 +643,7 @@ export const appRouter = router({
     saveDashboard: protectedProcedure.input(z.object({ visibleWidgets: z.array(z.string().min(1).max(80)).min(1).max(20) })).mutation(async ({ ctx, input }) => { const db = await getDb(); if (!db) throw new Error("Database unavailable"); const serialized = JSON.stringify(input.visibleWidgets); const [current] = await db.select({ id: dashboardPreferences.id }).from(dashboardPreferences).where(eq(dashboardPreferences.userId, ctx.user.id)).limit(1); if (current) await db.update(dashboardPreferences).set({ visibleWidgets: serialized }).where(eq(dashboardPreferences.userId, ctx.user.id)); else await db.insert(dashboardPreferences).values({ userId: ctx.user.id, visibleWidgets: serialized }); await recordAudit(db, { actorId: ctx.user.id, entityType: "dashboard_preferences", action: "update", afterData: { visibleWidgets: input.visibleWidgets } }); const recipients = await db.select({ id: users.id }).from(users).where(inArray(users.role, ["admin", "area_manager"])); const targets = recipients.filter(recipient => recipient.id !== ctx.user.id); if (targets.length) await db.insert(notifications).values(targets.map(recipient => ({ recipientId: recipient.id, kind: "dashboard_preferences_changed", title: "تم تحديث مؤشرات لوحة التشغيل", content: `${ctx.user.name ?? "مستخدم"} حدّث تفضيلات المؤشرات`, entityType: "dashboard_preferences", entityId: ctx.user.id }))); return { success: true, visibleWidgets: input.visibleWidgets }; }),
   }),
   ops: router({
-    overview: protectedProcedure.input(z.object({ period: z.enum(["day", "week", "month"]).default("month"), regionId: z.number().int().positive().optional() }).optional()).query(({ ctx, input }) => getOperationsOverview(ctx.user, input?.period ?? "month", input?.regionId)),
+    overview: protectedProcedure.input(z.object({ period: z.enum(["day", "week", "month"]).default("month"), year: z.number().int().min(2000).max(2200).optional(), month: z.number().int().min(1).max(12).optional(), regionId: z.number().int().positive().optional() }).optional()).query(({ ctx, input }) => getOperationsOverview(ctx.user, input?.period ?? "month", input?.regionId, input?.year, input?.month)),
   }),
 });
 

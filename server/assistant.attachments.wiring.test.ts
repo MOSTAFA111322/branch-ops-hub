@@ -10,7 +10,7 @@ describe("interactive assistant and attachment preview wiring", () => {
   it("exposes a protected Arabic assistant procedure grounded in operations data", () => {
     expect(router).toContain("assistant: router");
     expect(router).toContain("roleProcedure([\"admin\", \"area_manager\"])");
-    expect(router).toContain("getOperationsOverview(ctx.user, input.period)");
+    expect(router).toContain("getOperationsOverview(ctx.user, input.period, undefined, input.year, input.month)");
     expect(router).toContain("branchId: z.number");
     expect(router).toContain("from: z.string().date()");
     expect(router).toContain("to: z.string().date()");

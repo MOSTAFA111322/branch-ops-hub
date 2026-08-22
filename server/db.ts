@@ -94,7 +94,7 @@ export async function getBranchProfile(id: number, user: Pick<User, "id" | "role
   return { branch, employees, contracts, assets, inventory, documents: documentsRows, actions, qualityCases: qualityRows, maintenanceTickets: maintenanceRows, events, visits: visitsRows, requests, tasks: tasksRows };
 }
 
-export async function getOperationsOverview(user: Pick<User, "id" | "role" | "regionId" | "branchId">, period: "day" | "week" | "month" = "month", regionId?: number) {
+export async function getOperationsOverview(user: Pick<User, "id" | "role" | "regionId" | "branchId">, period: "day" | "week" | "month" = "month", regionId?: number, year = new Date().getFullYear(), month = new Date().getMonth() + 1) {
   const db = await getDb();
   if (!db) return { visits: [], actions: [], documents: [], qualityCases: [], maintenanceTickets: [], requests: [], tasks: [], qualityAnalysis: [], operationalSummary: null };
   const visible = (await listBranches(user)).filter((branch) => !regionId || branch.regionId === regionId);
@@ -194,16 +194,18 @@ export async function getOperationsOverview(user: Pick<User, "id" | "role" | "re
     trendMap.set(key, current);
   }
   const financialTrend = Array.from(trendMap.values()).sort((a, b) => a.period.localeCompare(b.period)).slice(-12);
-  const branchFinancialMap = new Map<number, { id: number; name: string; city: string; operationalType: string; januaryRevenue: number | null; februaryRevenue: number | null; januaryProfit: number | null; februaryProfit: number | null; operatingExpenses: number }>();
-  for (const branch of visible) branchFinancialMap.set(branch.id, { id: branch.id, name: branch.name, city: branch.city, operationalType: branch.operationalType ?? "branch", januaryRevenue: null, februaryRevenue: null, januaryProfit: null, februaryProfit: null, operatingExpenses: 0 });
+  const previousPeriod = month === 1 ? { year: year - 1, month: 12 } : { year, month: month - 1 };
+  const currentPeriodLabel = `${year}-${String(month).padStart(2, "0")}`;
+  const previousPeriodLabel = `${previousPeriod.year}-${String(previousPeriod.month).padStart(2, "0")}`;
+  const branchFinancialMap = new Map<number, { id: number; name: string; city: string; operationalType: string; currentRevenue: number | null; previousRevenue: number | null; currentProfit: number | null; previousProfit: number | null; currentExpenses: number; }>();
+  for (const branch of visible) branchFinancialMap.set(branch.id, { id: branch.id, name: branch.name, city: branch.city, operationalType: branch.operationalType ?? "branch", currentRevenue: null, previousRevenue: null, currentProfit: null, previousProfit: null, currentExpenses: 0 });
   for (const row of visibleFinancialRows) {
     const item = branchFinancialMap.get(row.branchId); if (!item) continue;
-    if (row.periodYear === 2026 && row.periodMonth === 1) { item.januaryRevenue = Number(row.revenue ?? 0); item.januaryProfit = Number(row.netProfit ?? 0); }
-    if (row.periodYear === 2026 && row.periodMonth === 2) { item.februaryRevenue = Number(row.revenue ?? 0); item.februaryProfit = Number(row.netProfit ?? 0); }
-    item.operatingExpenses += Number(row.operatingExpenses ?? 0);
+    if (row.periodYear === year && row.periodMonth === month) { item.currentRevenue = Number(row.revenue ?? 0); item.currentProfit = Number(row.netProfit ?? 0); item.currentExpenses = Number(row.operatingExpenses ?? 0); }
+    if (row.periodYear === previousPeriod.year && row.periodMonth === previousPeriod.month) { item.previousRevenue = Number(row.revenue ?? 0); item.previousProfit = Number(row.netProfit ?? 0); }
   }
-  const financialByBranch = Array.from(branchFinancialMap.values()).map((item) => ({ ...item, revenueChangePercent: item.januaryRevenue ? Math.round(((item.februaryRevenue ?? 0) - item.januaryRevenue) / item.januaryRevenue * 1000) / 10 : null, profitChangePercent: item.januaryProfit ? Math.round(((item.februaryProfit ?? 0) - item.januaryProfit) / item.januaryProfit * 1000) / 10 : null }));
-  return { comparison, financialTrend, financialByBranch, visits: visitsRows, actions: actionRows, documents: documentRows, qualityCases: qualityRows, qualityAnalysis, operationalSummary, previousOperationalSummary, operationalComparison, dataQuality, qualitySummary, maintenanceTickets: maintenanceRows, requests: scopedRequests, tasks: scopedTasks, tasksAndRequests: [...scopedTasks, ...scopedRequests] };
+  const financialByBranch = Array.from(branchFinancialMap.values()).map((item) => ({ ...item, operatingExpenses: item.currentExpenses, currentPeriod: currentPeriodLabel, previousPeriod: previousPeriodLabel, revenueChangePercent: item.previousRevenue ? Math.round(((item.currentRevenue ?? 0) - item.previousRevenue) / item.previousRevenue * 1000) / 10 : null, profitChangePercent: item.previousProfit ? Math.round(((item.currentProfit ?? 0) - item.previousProfit) / item.previousProfit * 1000) / 10 : null }));
+  return { comparison, financialTrend, financialByBranch, financialPeriod: { year, month, current: currentPeriodLabel, previous: previousPeriodLabel }, visits: visitsRows, actions: actionRows, documents: documentRows, qualityCases: qualityRows, qualityAnalysis, operationalSummary, previousOperationalSummary, operationalComparison, dataQuality, qualitySummary, maintenanceTickets: maintenanceRows, requests: scopedRequests, tasks: scopedTasks, tasksAndRequests: [...scopedTasks, ...scopedRequests] };
 }
 
 export async function getInventoryMovementAnalysis(user: Pick<User, "id" | "role" | "regionId" | "branchId">, filters: { itemQuery?: string; costCenterCode?: string; branchId?: number; from?: Date; to?: Date }) {
