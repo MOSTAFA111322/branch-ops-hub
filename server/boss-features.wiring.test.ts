@@ -28,4 +28,14 @@ describe("Boss-level operational extensions", () => {
     expect(source).toContain("liveSummary?.upcomingVisits");
     expect(source).toContain("healthyBranches");
   });
+
+  it("wires manager filters, financial comparison chart, and PDF export", () => {
+    const source = readFileSync(resolve(process.cwd(), "client/src/pages/Home.tsx"), "utf8");
+    expect(source).toContain("managerHealthFilter");
+    expect(source).toContain("managerTargetFilter");
+    expect(source).toContain("financialJanFeb");
+    expect(source).toContain("BarChart");
+    expect(source).toContain("exportAreaManagerPdf");
+    expect(source).toContain("تصدير PDF");
+  });
 });
