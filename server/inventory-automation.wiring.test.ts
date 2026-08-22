@@ -7,6 +7,7 @@ describe("inventory automation wiring", () => {
   const db = readFileSync(resolve(process.cwd(), "server/db.ts"), "utf8");
   const view = readFileSync(resolve(process.cwd(), "client/src/components/InventoryAnalysisView.tsx"), "utf8");
   const home = readFileSync(resolve(process.cwd(), "client/src/pages/Home.tsx"), "utf8");
+  const comparison = readFileSync(resolve(process.cwd(), "client/src/components/SmartBranchComparison.tsx"), "utf8");
 
   it("exposes guarded import with source metadata and duplicate detection", () => {
     expect(router).toContain("importRows:");
@@ -34,6 +35,14 @@ describe("inventory automation wiring", () => {
     expect(home).toContain("alertTypeFilter");
     expect(home).toContain("exportAlertsImage");
     expect(home).toContain("exportAlertsPdf");
+  });
+
+  it("wires multi-branch temporal comparison and clickable smart summary", () => {
+    expect(home).toContain("SmartBranchComparison");
+    expect(comparison).toContain("selectedIds");
+    expect(comparison).toContain("exportWorkbook");
+    expect(comparison).toContain("onOpenInventory");
+    expect(home).toContain('setActiveNav("تحليل حركة الأصناف")');
   });
 
   it("feeds stale and low-stock inventory alerts into the dashboard", () => {
