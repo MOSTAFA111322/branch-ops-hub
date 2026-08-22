@@ -4,11 +4,11 @@ import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, roleProcedure, router } from "./_core/trpc";
 import { listHeartbeatJobs, updateHeartbeatJob } from "./_core/heartbeat";
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { getBranchById, getBranchProfile, getDashboardSummary, getInventoryMovementAnalysis, getOperationsOverview, listBranches, getDb } from "./db";
 import { retryCommandUsageDigest, retryScheduledReportDelivery } from "./scheduled";
-import { branches, regions, branchAssets, branchFinancialSnapshots, checklistItems, checklistTemplates, correctiveActions, dashboardPreferences, documentVersions, documents, internalRequests, maintenanceTickets, qualityCases, tasks, users, visitChecklistResults, visits, auditLogs, notifications, reportApprovals, scheduledReportRecipients, scheduledReportDeliveries, costCenterMappings, inventoryMovementSnapshots } from "../drizzle/schema";
+import { branches, regions, branchAssets, branchFinancialSnapshots, checklistItems, checklistTemplates, correctiveActions, dashboardPreferences, documentVersions, documents, internalRequests, maintenanceTickets, qualityCases, tasks, users, userBranchPermissions, reportShareLogs, visitChecklistResults, visits, auditLogs, notifications, reportApprovals, scheduledReportRecipients, scheduledReportDeliveries, costCenterMappings, inventoryMovementSnapshots } from "../drizzle/schema";
 import { aggregateFinancialComparison } from "../shared/financials";
 import { invokeLLM } from "./_core/llm";
 
@@ -246,6 +246,48 @@ export const appRouter = router({
       return { success: true };
     }),
   }),
+  permissions: router({
+    list: roleProcedure(["admin"]).query(async () => {
+      const db = await getDb(); if (!db) throw new Error("Database unavailable");
+      const [userRows, branchRows, permissionRows] = await Promise.all([
+        db.select({ id: users.id, name: users.name, email: users.email, role: users.role }).from(users).orderBy(users.name).limit(500),
+        db.select({ id: branches.id, code: branches.code, name: branches.name, city: branches.city }).from(branches).orderBy(branches.code),
+        db.select().from(userBranchPermissions).limit(5000),
+      ]);
+      return { users: userRows, branches: branchRows, permissions: permissionRows };
+    }),
+    upsert: roleProcedure(["admin"]).input(z.object({ userId: z.number().int().positive(), branchId: z.number().int().positive(), canView: z.boolean(), canExport: z.boolean(), canShare: z.boolean() })).mutation(async ({ input, ctx }) => {
+      const db = await getDb(); if (!db) throw new Error("Database unavailable");
+      const [existing] = await db.select().from(userBranchPermissions).where(and(eq(userBranchPermissions.userId, input.userId), eq(userBranchPermissions.branchId, input.branchId))).limit(1);
+      if (existing) await db.update(userBranchPermissions).set({ canView: input.canView, canExport: input.canExport, canShare: input.canShare }).where(eq(userBranchPermissions.id, existing.id));
+      else await db.insert(userBranchPermissions).values(input);
+      await recordAudit(db, { actorId: ctx.user.id, branchId: input.branchId, entityType: "user_branch_permission", entityId: input.userId, action: existing ? "update" : "create", beforeData: existing, afterData: input });
+      return { success: true };
+    }),
+    remove: roleProcedure(["admin"]).input(z.object({ userId: z.number().int().positive(), branchId: z.number().int().positive() })).mutation(async ({ input, ctx }) => {
+      const db = await getDb(); if (!db) throw new Error("Database unavailable");
+      await db.delete(userBranchPermissions).where(and(eq(userBranchPermissions.userId, input.userId), eq(userBranchPermissions.branchId, input.branchId)));
+      await recordAudit(db, { actorId: ctx.user.id, branchId: input.branchId, entityType: "user_branch_permission", entityId: input.userId, action: "delete", afterData: input });
+      return { success: true };
+    }),
+  }),
+  reportShares: router({
+    list: roleProcedure(["admin", "area_manager"]).input(z.object({ reportId: z.number().int().positive().optional() }).optional()).query(async ({ input, ctx }) => {
+      const db = await getDb(); if (!db) throw new Error("Database unavailable");
+      const rows = await db.select().from(reportShareLogs).where(input?.reportId ? eq(reportShareLogs.reportId, input.reportId) : undefined).orderBy(desc(reportShareLogs.sharedAt)).limit(500);
+      return ctx.user.role === "admin" ? rows : rows.filter((row) => row.sharedById === ctx.user.id);
+    }),
+    create: roleProcedure(["admin", "area_manager"]).input(z.object({ reportId: z.number().int().positive(), recipients: z.array(z.string().trim().email()).min(1).max(100), status: z.enum(["queued", "sent", "failed", "partial"]).default("queued"), channel: z.string().trim().min(1).max(40).default("email"), error: z.string().max(2000).nullable().optional() })).mutation(async ({ input, ctx }) => {
+      const db = await getDb(); if (!db) throw new Error("Database unavailable");
+      const inserted = await db.insert(reportShareLogs).values({ reportId: input.reportId, sharedById: ctx.user.id, recipients: JSON.stringify(input.recipients), status: input.status, channel: input.channel, error: input.error ?? null });
+      return { id: Number(inserted[0].insertId), success: true };
+    }),
+    updateStatus: roleProcedure(["admin", "area_manager"]).input(z.object({ id: z.number().int().positive(), status: z.enum(["queued", "sent", "failed", "partial"]), error: z.string().max(2000).nullable().optional() })).mutation(async ({ input }) => {
+      const db = await getDb(); if (!db) throw new Error("Database unavailable");
+      await db.update(reportShareLogs).set({ status: input.status, error: input.error ?? null }).where(eq(reportShareLogs.id, input.id));
+      return { success: true };
+    }),
+  }),
   branches: router({
     list: protectedProcedure.query(({ ctx }) => listBranches(ctx.user)),
     getById: protectedProcedure.input(z.object({ id: z.number().int().positive() })).query(({ input, ctx }) => getBranchById(input.id, ctx.user)),
@@ -258,6 +300,9 @@ export const appRouter = router({
       region: z.string().min(1).max(120),
       city: z.string().min(1).max(120),
       managerName: z.string().max(160).optional(),
+      latitude: z.number().min(-90).max(90).optional(),
+      longitude: z.number().min(-180).max(180).optional(),
+      coordinateSource: z.string().max(120).optional(),
     })).mutation(async ({ input }) => {
       const db = await getDb();
       if (!db) throw new Error("Database unavailable");
@@ -273,7 +318,7 @@ export const appRouter = router({
           resolvedRegionId = Number(createdRegion[0].insertId);
         }
       }
-      const result = await db.insert(branches).values({ ...input, regionId: resolvedRegionId });
+      const result = await db.insert(branches).values({ ...input, regionId: resolvedRegionId, latitude: input.latitude === undefined ? undefined : String(input.latitude), longitude: input.longitude === undefined ? undefined : String(input.longitude) });
       return { id: result[0].insertId, ...input, regionId: resolvedRegionId };
     }),
     update: roleProcedure(["admin", "area_manager"]).input(z.object({
@@ -288,6 +333,9 @@ export const appRouter = router({
       phone: z.string().max(32).nullable().optional(),
       status: z.enum(["active", "paused", "closed"]).optional(),
       operationalType: z.enum(["branch", "representative", "warehouse"]).optional(),
+      latitude: z.number().min(-90).max(90).nullable().optional(),
+      longitude: z.number().min(-180).max(180).nullable().optional(),
+      coordinateSource: z.string().max(120).nullable().optional(),
     })).mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new Error("Database unavailable");
@@ -295,9 +343,10 @@ export const appRouter = router({
       if (!existing[0]) throw new TRPCError({ code: "NOT_FOUND", message: "الفرع غير موجود." });
       if (ctx.user.role === "area_manager" && existing[0].regionId !== ctx.user.regionId) throw new TRPCError({ code: "FORBIDDEN" });
       if (ctx.user.role === "area_manager" && (input.regionId !== undefined || input.region !== undefined)) throw new TRPCError({ code: "FORBIDDEN", message: "لا يمكن لمدير المنطقة تغيير نطاق الفرع." });
-      const { id, ...changes } = input;
-      await db.update(branches).set(changes).where(eq(branches.id, id));
-      return { id, ...changes };
+      const { id, latitude, longitude, ...changes } = input;
+      const normalizedChanges = { ...changes, ...(latitude !== undefined ? { latitude: latitude === null ? null : String(latitude) } : {}), ...(longitude !== undefined ? { longitude: longitude === null ? null : String(longitude) } : {}) };
+      await db.update(branches).set(normalizedChanges).where(eq(branches.id, id));
+      return { id, ...normalizedChanges };
     }),
   }),
   costCenters: router({

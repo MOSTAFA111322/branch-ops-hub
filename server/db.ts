@@ -1,6 +1,6 @@
 import { and, desc, eq, inArray, gte, lt } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { branches, branchAssets, branchContracts, branchEmployees, branchEvents, branchInventory, branchFinancialSnapshots, correctiveActions, documents, internalRequests, maintenanceTickets, qualityCases, tasks, users, visits, inventoryMovementSnapshots, InsertUser, User } from "../drizzle/schema";
+import { branches, branchAssets, branchContracts, branchEmployees, branchEvents, branchInventory, branchFinancialSnapshots, correctiveActions, documents, internalRequests, maintenanceTickets, qualityCases, tasks, users, visits, inventoryMovementSnapshots, userBranchPermissions, InsertUser, User } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -45,11 +45,16 @@ export async function getUserByOpenId(openId: string) {
   return result[0];
 }
 
-export async function listBranches(user?: Pick<User, "role" | "regionId" | "branchId">) {
+export async function listBranches(user?: Pick<User, "id" | "role" | "regionId" | "branchId">) {
   const db = await getDb();
   if (!db) return [];
   const rows = await db.select().from(branches).orderBy(desc(branches.healthScore));
   if (!user || user.role === "admin") return rows;
+  const permissionRows = await db.select({ branchId: userBranchPermissions.branchId, canView: userBranchPermissions.canView }).from(userBranchPermissions).where(eq(userBranchPermissions.userId, user.id));
+  if (permissionRows.length) {
+    const allowedIds = new Set(permissionRows.filter((permission) => permission.canView).map((permission) => permission.branchId));
+    return rows.filter((branch) => allowedIds.has(branch.id));
+  }
   return rows.filter((branch) => user.branchId ? branch.id === user.branchId : user.regionId ? branch.regionId === user.regionId : false);
 }
 
@@ -60,16 +65,17 @@ async function getBranchRecordById(id: number) {
   return result[0];
 }
 
-export async function getBranchById(id: number, user: Pick<User, "role" | "regionId" | "branchId">) {
+export async function getBranchById(id: number, user: Pick<User, "id" | "role" | "regionId" | "branchId">) {
   return getBranchProfile(id, user);
 }
 
-export async function getBranchProfile(id: number, user: Pick<User, "role" | "regionId" | "branchId">) {
+export async function getBranchProfile(id: number, user: Pick<User, "id" | "role" | "regionId" | "branchId">) {
   const db = await getDb();
   if (!db) return undefined;
   const branch = await getBranchRecordById(id);
   if (!branch) return undefined;
-  const allowed = user.role === "admin" || (user.branchId ? user.branchId === id : user.regionId ? user.regionId === branch.regionId : false);
+  const visibleBranches = await listBranches(user);
+  const allowed = visibleBranches.some((visibleBranch) => visibleBranch.id === id);
   if (!allowed) return undefined;
   const [employees, contracts, assets, inventory, documentsRows, actions, qualityRows, maintenanceRows, events, visitsRows, requests, tasksRows] = await Promise.all([
     db.select().from(branchEmployees).where(eq(branchEmployees.branchId, id)).orderBy(desc(branchEmployees.createdAt)),

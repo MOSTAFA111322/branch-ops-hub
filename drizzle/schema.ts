@@ -14,6 +14,29 @@ export const users = mysqlTable("users", {
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
 });
 
+export const userBranchPermissions = mysqlTable("userBranchPermissions", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  branchId: int("branchId").notNull(),
+  canView: boolean("canView").default(true).notNull(),
+  canExport: boolean("canExport").default(false).notNull(),
+  canShare: boolean("canShare").default(false).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => ({ userBranchUnique: uniqueIndex("user_branch_permission_unique").on(table.userId, table.branchId) }));
+
+export const reportShareLogs = mysqlTable("reportShareLogs", {
+  id: int("id").autoincrement().primaryKey(),
+  reportId: int("reportId").notNull(),
+  sharedById: int("sharedById").notNull(),
+  recipients: text("recipients").notNull(),
+  status: mysqlEnum("status", ["queued", "sent", "failed", "partial"]).default("queued").notNull(),
+  channel: varchar("channel", { length: 40 }).default("email").notNull(),
+  error: text("error"),
+  sharedAt: timestamp("sharedAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
 export const dashboardPreferences = mysqlTable("dashboardPreferences", {
   id: int("id").autoincrement().primaryKey(),
   userId: int("userId").notNull().unique(),
@@ -56,6 +79,10 @@ export const branches = mysqlTable("branches", {
   region: varchar("region", { length: 120 }).notNull(),
   city: varchar("city", { length: 120 }).notNull(),
   address: text("address"),
+  latitude: decimal("latitude", { precision: 10, scale: 7 }),
+  longitude: decimal("longitude", { precision: 10, scale: 7 }),
+  coordinateSource: varchar("coordinateSource", { length: 120 }),
+  coordinatesVerifiedAt: timestamp("coordinatesVerifiedAt"),
   managerName: varchar("managerName", { length: 160 }),
   phone: varchar("phone", { length: 32 }),
   status: mysqlEnum("status", ["active", "paused", "closed"]).default("active").notNull(),
