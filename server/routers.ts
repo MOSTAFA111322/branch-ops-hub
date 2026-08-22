@@ -473,6 +473,16 @@ export const appRouter = router({
       }
       return { success: true, created, skipped, marker: demoMarker };
     }),
+    purgeDemoData: roleProcedure(["admin"]).mutation(async ({ ctx }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      const demoRows = await db.select({ id: branchFinancialSnapshots.id, branchId: branchFinancialSnapshots.branchId, notes: branchFinancialSnapshots.notes }).from(branchFinancialSnapshots);
+      const testRows = demoRows.filter((row) => String(row.notes ?? "").startsWith("[TEST_DATA"));
+      if (!testRows.length) return { success: true, deleted: 0 };
+      await db.delete(branchFinancialSnapshots).where(inArray(branchFinancialSnapshots.id, testRows.map((row) => row.id)));
+      await recordAudit(db, { actorId: ctx.user.id, entityType: "financial_demo_data", action: "purge", afterData: { deleted: testRows.length, snapshotIds: testRows.map((row) => row.id) } });
+      return { success: true, deleted: testRows.length };
+    }),
     remove: roleProcedure(["admin", "area_manager", "branch_manager"]).input(z.object({ id: z.number().int().positive() })).mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new Error("Database unavailable");
