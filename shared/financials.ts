@@ -27,3 +27,14 @@ export function aggregateFinancialComparison(locations: ComparisonLocation[], sn
     return { type, label: label(type), current, previous, expenseChange, expenseChangePercent: previous.expenses === 0 ? (current.expenses === 0 ? 0 : null) : (expenseChange / previous.expenses) * 100, locationCount: ids.length };
   });
 }
+
+/**
+ * Normalizes a signed value from an accounting export into a positive semantic amount.
+ * The import schema stores revenue, returns, costs, and expenses in separate fields,
+ * so the sign supplied by the source system is metadata rather than arithmetic direction.
+ */
+export function normalizeImportedAmount(value: unknown): number {
+  const raw = String(value ?? "").replace(/[٠-٩]/g, (digit) => String("٠١٢٣٤٥٦٧٨٩".indexOf(digit))).replace(/[٬,\s]/g, "").replace(/[٫]/g, ".");
+  const parsed = Number(raw.replace(/[^0-9.+-]/g, ""));
+  return Number.isFinite(parsed) ? Math.abs(parsed) : 0;
+}
