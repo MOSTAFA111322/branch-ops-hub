@@ -335,3 +335,47 @@ export const reportApprovals = mysqlTable("reportApprovals", {
 export type CorrectiveAction = typeof correctiveActions.$inferSelect;
 export type Notification = typeof notifications.$inferSelect;
 export type ReportApproval = typeof reportApprovals.$inferSelect;
+
+
+/** Historical inventory movement imported from warehouse/branch reports. */
+export const inventoryMovementSnapshots = mysqlTable("inventoryMovementSnapshots", {
+  id: int("id").autoincrement().primaryKey(),
+  branchId: int("branchId"),
+  costCenterCode: varchar("costCenterCode", { length: 80 }).notNull(),
+  periodStart: timestamp("periodStart").notNull(),
+  periodEnd: timestamp("periodEnd").notNull(),
+  itemCode: varchar("itemCode", { length: 80 }).notNull(),
+  itemName: varchar("itemName", { length: 240 }).notNull(),
+  availableQuantity: decimal("availableQuantity", { precision: 16, scale: 3 }).default("0").notNull(),
+  availableCost: decimal("availableCost", { precision: 16, scale: 2 }).default("0").notNull(),
+  openingQuantity: decimal("openingQuantity", { precision: 16, scale: 3 }).default("0").notNull(),
+  openingCost: decimal("openingCost", { precision: 16, scale: 2 }).default("0").notNull(),
+  receivedQuantity: decimal("receivedQuantity", { precision: 16, scale: 3 }).default("0").notNull(),
+  receivedCost: decimal("receivedCost", { precision: 16, scale: 2 }).default("0").notNull(),
+  issuedQuantity: decimal("issuedQuantity", { precision: 16, scale: 3 }).default("0").notNull(),
+  transferQuantity: decimal("transferQuantity", { precision: 16, scale: 3 }).default("0").notNull(),
+  adjustmentQuantity: decimal("adjustmentQuantity", { precision: 16, scale: 3 }).default("0").notNull(),
+  unreceivedQuantity: decimal("unreceivedQuantity", { precision: 16, scale: 3 }).default("0").notNull(),
+  netReceivedQuantity: decimal("netReceivedQuantity", { precision: 16, scale: 3 }).default("0").notNull(),
+  salesQuantity: decimal("salesQuantity", { precision: 16, scale: 3 }).default("0").notNull(),
+  salesValue: decimal("salesValue", { precision: 16, scale: 2 }).default("0").notNull(),
+  salesCost: decimal("salesCost", { precision: 16, scale: 2 }).default("0").notNull(),
+  returnQuantity: decimal("returnQuantity", { precision: 16, scale: 3 }).default("0").notNull(),
+  returnValue: decimal("returnValue", { precision: 16, scale: 2 }).default("0").notNull(),
+  returnCost: decimal("returnCost", { precision: 16, scale: 2 }).default("0").notNull(),
+  netQuantity: decimal("netQuantity", { precision: 16, scale: 3 }).default("0").notNull(),
+  netSales: decimal("netSales", { precision: 16, scale: 2 }).default("0").notNull(),
+  netCost: decimal("netCost", { precision: 16, scale: 2 }).default("0").notNull(),
+  profitabilityRate: decimal("profitabilityRate", { precision: 10, scale: 4 }),
+  grossMargin: decimal("grossMargin", { precision: 16, scale: 2 }),
+  sellingRate: decimal("sellingRate", { precision: 10, scale: 4 }),
+  stockAgeDays: decimal("stockAgeDays", { precision: 12, scale: 2 }),
+  dailySellingRate: decimal("dailySellingRate", { precision: 12, scale: 4 }),
+  expectedStockoutDays: decimal("expectedStockoutDays", { precision: 12, scale: 2 }),
+  sourceFileName: varchar("sourceFileName", { length: 255 }).notNull(),
+  sourceSheet: varchar("sourceSheet", { length: 120 }).notNull(),
+  importedBy: int("importedBy"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => ({
+  itemCenterPeriodUnique: uniqueIndex("inventory_item_center_period_unique").on(table.costCenterCode, table.periodStart, table.periodEnd, table.itemCode),
+}));
