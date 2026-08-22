@@ -35,7 +35,10 @@ export const appRouter = router({
     }),
   }),
   dashboard: router({
-    summary: protectedProcedure.query(({ ctx }) => getDashboardSummary(ctx.user)),
+    summary: protectedProcedure.input(z.object({ from: z.string().date().optional(), to: z.string().date().optional() }).optional()).query(({ ctx, input }) => {
+      if (input?.from && input?.to && input.from > input.to) throw new TRPCError({ code: "BAD_REQUEST", message: "الفترة الزمنية غير صحيحة." });
+      return getDashboardSummary(ctx.user, { from: input?.from ? new Date(`${input.from}T00:00:00.000Z`) : undefined, to: input?.to ? new Date(`${input.to}T23:59:59.999Z`) : undefined });
+    }),
   }),
   inventory: router({
     analyze: roleProcedure(["admin", "area_manager", "branch_manager", "warehouse"]).input(z.object({
@@ -382,11 +385,23 @@ export const appRouter = router({
         if (!visibleCodes.has(row.code)) { results.push({ code: row.code, updated: false, reason: "غير موجود أو خارج نطاق الصلاحية" }); continue; }
         const branch = visible.find(item => item.code === row.code);
         if (!branch) { results.push({ code: row.code, updated: false, reason: "غير موجود" }); continue; }
-        await db.update(branches).set({ latitude: row.latitude.toFixed(7), longitude: row.longitude.toFixed(7), coordinateSource: row.coordinateSource, coordinatesVerifiedAt: new Date() }).where(eq(branches.id, branch.id));
+        await db.update(branches).set({ latitude: row.latitude.toFixed(7), longitude: row.longitude.toFixed(7), coordinateSource: row.coordinateSource, coordinatesVerifiedAt: null }).where(eq(branches.id, branch.id));
         await recordAudit(db, { actorId: ctx.user.id, branchId: branch.id, entityType: "branch_coordinates", entityId: branch.id, action: "update", beforeData: { latitude: branch.latitude, longitude: branch.longitude }, afterData: row });
         results.push({ code: row.code, updated: true });
       }
       return { success: true, updated: results.filter(item => item.updated).length, rejected: results.filter(item => !item.updated).length, results };
+    }),
+    verifyCoordinates: roleProcedure(["admin", "area_manager"]).input(z.object({ branchIds: z.array(z.number().int().positive()).min(1).max(500) })).mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      const visible = await listBranches(ctx.user);
+      const allowed = visible.filter((branch) => input.branchIds.includes(branch.id));
+      const eligible = allowed.filter((branch) => Number.isFinite(Number(branch.latitude)) && Number.isFinite(Number(branch.longitude)) && Boolean(String(branch.coordinateSource ?? "").trim()));
+      if (!eligible.length) throw new TRPCError({ code: "BAD_REQUEST", message: "لا توجد إحداثيات صالحة ومصدر موثق للتحقق." });
+      const verifiedAt = new Date();
+      await db.update(branches).set({ coordinatesVerifiedAt: verifiedAt }).where(inArray(branches.id, eligible.map((branch) => branch.id)));
+      await recordAudit(db, { actorId: ctx.user.id, entityType: "branch_coordinates", action: "bulk_verify", afterData: { branchIds: eligible.map((branch) => branch.id), verifiedCount: eligible.length } });
+      return { verified: eligible.length, rejected: input.branchIds.length - eligible.length, verifiedAt };
     }),
   }),
   costCenters: router({

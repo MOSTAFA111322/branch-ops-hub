@@ -19,9 +19,13 @@ describe("inventory analysis wiring", () => {
     const home = readFileSync(resolve(process.cwd(), "client/src/pages/Home.tsx"), "utf8");
     const component = readFileSync(resolve(process.cwd(), "client/src/components/InventoryAnalysisView.tsx"), "utf8");
     expect(home).toContain('label: "تحليل حركة الأصناف"');
-    expect(home).toContain("<InventoryAnalysisView />");
+    expect(home).toContain("<InventoryAnalysisView initialFrom={customFrom} initialTo={customTo} />");
+    expect(home).toContain('aria-label="بداية النطاق المخصص"');
+    expect(home).toContain("(summaryFetching || executiveFetching)");
     expect(home).toContain("تحديد صنف للمساعد");
     expect(component).toContain("trpc.inventory.analyze.useQuery");
+    expect(component).toContain("initialFrom");
+    expect(component).toContain("analysis.isFetching");
     expect(component).toContain("التقرير الشهري");
     expect(component).toContain("الأصناف الراكدة");
     expect(component).toContain("الأكثر مبيعًا");

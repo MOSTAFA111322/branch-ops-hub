@@ -27,5 +27,7 @@ describe("admin follow-up features wiring", () => {
     expect(coordinates).toContain("عناوين الأعمدة تختلف عن قالب CSV");
     expect(coordinates).toContain("mapped.includes(\"latitude\")");
     expect(coordinates).toContain('role="status"');
+    expect(coordinates).toContain("trpc.branches.verifyCoordinates.useMutation");
+    expect(coordinates).toContain("تحقق جماعي من الإحداثيات");
   });
 });
