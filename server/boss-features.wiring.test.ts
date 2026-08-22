@@ -38,4 +38,16 @@ describe("Boss-level operational extensions", () => {
     expect(source).toContain("exportAreaManagerPdf");
     expect(source).toContain("تصدير PDF");
   });
+
+  it("wires official PDF header, percentage tooltips, and persisted filters", () => {
+    const source = readFileSync(resolve(process.cwd(), "client/src/pages/Home.tsx"), "utf8");
+    const styles = readFileSync(resolve(process.cwd(), "client/src/index.css"), "utf8");
+    expect(source).toContain("VITE_APP_LOGO");
+    expect(source).toContain("شعار الشركة");
+    expect(source).toContain("revenueChangePercent");
+    expect(source).toContain("تغير المبيعات");
+    expect(source).toContain("localStorage.setItem(\"branchhub.managerHealthFilter\"");
+    expect(source).toContain("localStorage.setItem(\"branchhub.managerTargetFilter\"");
+    expect(styles).toContain("@media print");
+  });
 });
