@@ -6,7 +6,7 @@ import { protectedProcedure, publicProcedure, roleProcedure, router } from "./_c
 import { listHeartbeatJobs, updateHeartbeatJob } from "./_core/heartbeat";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
-import { getBranchById, getBranchProfile, getDashboardSummary, getOperationsOverview, listBranches, getDb } from "./db";
+import { getBranchById, getBranchProfile, getDashboardSummary, getInventoryMovementAnalysis, getOperationsOverview, listBranches, getDb } from "./db";
 import { retryCommandUsageDigest, retryScheduledReportDelivery } from "./scheduled";
 import { branches, regions, branchAssets, branchFinancialSnapshots, checklistItems, checklistTemplates, correctiveActions, dashboardPreferences, documentVersions, documents, internalRequests, maintenanceTickets, qualityCases, tasks, users, visitChecklistResults, visits, auditLogs, notifications, reportApprovals, scheduledReportRecipients, scheduledReportDeliveries, costCenterMappings } from "../drizzle/schema";
 import { aggregateFinancialComparison } from "../shared/financials";
@@ -37,11 +37,32 @@ export const appRouter = router({
   dashboard: router({
     summary: protectedProcedure.query(({ ctx }) => getDashboardSummary(ctx.user)),
   }),
+  inventory: router({
+    analyze: roleProcedure(["admin", "area_manager", "branch_manager", "warehouse"]).input(z.object({
+      itemQuery: z.string().trim().max(160).optional(),
+      costCenterCode: z.string().trim().max(80).optional(),
+      branchId: z.number().int().positive().optional(),
+      from: z.string().date().optional(),
+      to: z.string().date().optional(),
+    })).query(async ({ input, ctx }) => {
+      if (input.from && input.to && input.from > input.to) throw new TRPCError({ code: "BAD_REQUEST", message: "الفترة الزمنية غير صحيحة." });
+      const visibleBranches = await listBranches(ctx.user);
+      if (input.branchId && !visibleBranches.some((branch) => branch.id === input.branchId)) throw new TRPCError({ code: "FORBIDDEN", message: "لا تملك صلاحية الوصول إلى هذا الفرع." });
+      return getInventoryMovementAnalysis(ctx.user, {
+        itemQuery: input.itemQuery,
+        costCenterCode: input.costCenterCode,
+        branchId: input.branchId,
+        from: input.from ? new Date(`${input.from}T00:00:00.000Z`) : undefined,
+        to: input.to ? new Date(`${input.to}T23:59:59.999Z`) : undefined,
+      });
+    }),
+  }),
   assistant: router({
     ask: roleProcedure(["admin", "area_manager"]).input(z.object({
       question: z.string().trim().min(2).max(1200),
       history: z.array(z.object({ role: z.enum(["user", "assistant"]), content: z.string().max(4000) })).max(12).default([]),
       branchId: z.number().int().positive().optional(),
+      itemQuery: z.string().trim().max(160).optional(),
       period: z.enum(["day", "week", "month"]).default("month"),
       from: z.string().date().optional(),
       to: z.string().date().optional(),
@@ -51,12 +72,13 @@ export const appRouter = router({
       const selectedBranch = input.branchId ? visibleBranches.find((branch) => branch.id === input.branchId) : undefined;
       if (input.branchId && !selectedBranch) throw new TRPCError({ code: "FORBIDDEN", message: "لا تملك صلاحية الوصول إلى هذا الفرع." });
       const overview = await getOperationsOverview(ctx.user, input.period);
+      const inventoryMovement = await getInventoryMovementAnalysis(ctx.user, { itemQuery: input.itemQuery, branchId: input.branchId, from: input.from ? new Date(`${input.from}T00:00:00.000Z`) : undefined, to: input.to ? new Date(`${input.to}T23:59:59.999Z`) : undefined });
       const fromDate = input.from ? new Date(`${input.from}T00:00:00.000Z`) : undefined;
       const toDate = input.to ? new Date(`${input.to}T23:59:59.999Z`) : undefined;
       const inScope = (row: any) => (!input.branchId || row.branchId === input.branchId) && (!fromDate || !row.createdAt || new Date(row.createdAt).getTime() >= fromDate.getTime()) && (!toDate || !row.createdAt || new Date(row.createdAt).getTime() <= toDate.getTime());
       const scopedRows = (rows: any[] | undefined) => (rows ?? []).filter(inScope);
       const context = JSON.stringify({
-        scope: { branchId: input.branchId ?? null, branchName: selectedBranch?.name ?? "كل الفروع", period: input.period, from: input.from ?? null, to: input.to ?? null },
+        scope: { branchId: input.branchId ?? null, branchName: selectedBranch?.name ?? "كل الفروع", itemQuery: input.itemQuery ?? null, period: input.period, from: input.from ?? null, to: input.to ?? null },
         financialTrend: overview.financialTrend,
         financialByBranch: input.branchId ? overview.financialByBranch?.filter((item: any) => item.id === input.branchId) : overview.financialByBranch,
         operationalSummary: overview.operationalSummary,
@@ -69,6 +91,7 @@ export const appRouter = router({
         maintenanceTickets: scopedRows(overview.maintenanceTickets),
         tasksAndRequests: scopedRows(overview.tasksAndRequests),
         openActions: scopedRows(overview.tasksAndRequests).filter((item: any) => item.status !== "done" && item.status !== "completed").length,
+        inventoryMovement,
       });
       const response = await invokeLLM({
         model: "gpt-5-mini",

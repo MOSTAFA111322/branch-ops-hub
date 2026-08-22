@@ -1,6 +1,6 @@
 import { and, desc, eq, inArray, gte, lt } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { branches, branchAssets, branchContracts, branchEmployees, branchEvents, branchInventory, branchFinancialSnapshots, correctiveActions, documents, internalRequests, maintenanceTickets, qualityCases, tasks, users, visits, InsertUser, User } from "../drizzle/schema";
+import { branches, branchAssets, branchContracts, branchEmployees, branchEvents, branchInventory, branchFinancialSnapshots, correctiveActions, documents, internalRequests, maintenanceTickets, qualityCases, tasks, users, visits, inventoryMovementSnapshots, InsertUser, User } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -197,6 +197,39 @@ export async function getOperationsOverview(user: Pick<User, "id" | "role" | "re
   }
   const financialByBranch = Array.from(branchFinancialMap.values()).map((item) => ({ ...item, revenueChangePercent: item.januaryRevenue ? Math.round(((item.februaryRevenue ?? 0) - item.januaryRevenue) / item.januaryRevenue * 1000) / 10 : null, profitChangePercent: item.januaryProfit ? Math.round(((item.februaryProfit ?? 0) - item.januaryProfit) / item.januaryProfit * 1000) / 10 : null }));
   return { comparison, financialTrend, financialByBranch, visits: visitsRows, actions: actionRows, documents: documentRows, qualityCases: qualityRows, qualityAnalysis, operationalSummary, previousOperationalSummary, operationalComparison, dataQuality, qualitySummary, maintenanceTickets: maintenanceRows, requests: scopedRequests, tasks: scopedTasks, tasksAndRequests: [...scopedTasks, ...scopedRequests] };
+}
+
+export async function getInventoryMovementAnalysis(user: Pick<User, "id" | "role" | "regionId" | "branchId">, filters: { itemQuery?: string; costCenterCode?: string; branchId?: number; from?: Date; to?: Date }) {
+  const db = await getDb();
+  if (!db) return { rows: [], monthlyReport: [], totals: { salesQuantity: 0, netSales: 0, netCost: 0, availableQuantity: 0 }, staleItems: [], topSellingItems: [] };
+  const visibleBranches = await db.select({ id: branches.id, regionId: branches.regionId }).from(branches);
+  const visibleIds = visibleBranches.filter((branch) => user.role === "admin" || (user.role === "area_manager" && branch.regionId === user.regionId) || ((user.role === "branch_manager" || user.role === "user") && branch.id === user.branchId)).map((branch) => branch.id);
+  const conditions = [] as any[];
+  if (filters.branchId) conditions.push(eq(inventoryMovementSnapshots.branchId, filters.branchId)); else if (visibleIds.length) conditions.push(inArray(inventoryMovementSnapshots.branchId, visibleIds));
+  if (filters.costCenterCode) conditions.push(eq(inventoryMovementSnapshots.costCenterCode, filters.costCenterCode));
+  if (filters.from) conditions.push(gte(inventoryMovementSnapshots.periodEnd, filters.from));
+  if (filters.to) conditions.push(lt(inventoryMovementSnapshots.periodStart, new Date(filters.to.getTime() + 86400000)));
+  const sourceRows = await db.select().from(inventoryMovementSnapshots).where(conditions.length ? and(...conditions) : undefined);
+  const query = filters.itemQuery?.trim().toLocaleLowerCase("ar");
+  const filtered = query ? sourceRows.filter((row) => row.itemCode.toLocaleLowerCase("ar").includes(query) || row.itemName.toLocaleLowerCase("ar").includes(query)) : sourceRows;
+  const groups = new Map<string, any>();
+  const monthlyGroups = new Map<string, any>();
+  for (const row of filtered) {
+    const key = `${row.itemCode}::${row.costCenterCode}`;
+    const current = groups.get(key) ?? { itemCode: row.itemCode, itemName: row.itemName, costCenterCode: row.costCenterCode, salesQuantity: 0, netSales: 0, netCost: 0, availableQuantity: 0, stockAgeDays: 0, rowCount: 0 };
+    current.salesQuantity += Number(row.salesQuantity ?? 0); current.netSales += Number(row.netSales ?? 0); current.netCost += Number(row.netCost ?? 0); current.availableQuantity += Number(row.availableQuantity ?? 0); current.stockAgeDays = Math.max(current.stockAgeDays, Number(row.stockAgeDays ?? 0)); current.rowCount += 1;
+    groups.set(key, current);
+    const month = new Date(row.periodStart).toISOString().slice(0, 7);
+    const monthlyKey = `${month}::${row.itemCode}::${row.costCenterCode}`;
+    const monthlyCurrent = monthlyGroups.get(monthlyKey) ?? { period: month, itemCode: row.itemCode, itemName: row.itemName, costCenterCode: row.costCenterCode, salesQuantity: 0, netSales: 0, netCost: 0, availableQuantity: 0, rowCount: 0 };
+    monthlyCurrent.salesQuantity += Number(row.salesQuantity ?? 0); monthlyCurrent.netSales += Number(row.netSales ?? 0); monthlyCurrent.netCost += Number(row.netCost ?? 0); monthlyCurrent.availableQuantity += Number(row.availableQuantity ?? 0); monthlyCurrent.rowCount += 1;
+    monthlyGroups.set(monthlyKey, monthlyCurrent);
+  }
+  const rows = Array.from(groups.values()).map((row) => ({ ...row, grossMargin: row.netSales - row.netCost, marginRate: row.netSales ? ((row.netSales - row.netCost) / row.netSales) * 100 : null })).sort((a, b) => b.netSales - a.netSales);
+  const staleItems = rows.filter((row) => row.salesQuantity <= 0 && row.availableQuantity > 0).sort((a, b) => b.availableQuantity - a.availableQuantity).slice(0, 50);
+  const topSellingItems = rows.filter((row) => row.salesQuantity > 0).slice(0, 50);
+  const monthlyReport = Array.from(monthlyGroups.values()).map((row) => ({ ...row, grossMargin: row.netSales - row.netCost, marginRate: row.netSales ? ((row.netSales - row.netCost) / row.netSales) * 100 : null })).sort((a, b) => a.period.localeCompare(b.period) || b.netSales - a.netSales).slice(0, 1000);
+  return { rows: rows.slice(0, 500), monthlyReport, totals: { salesQuantity: rows.reduce((sum, row) => sum + row.salesQuantity, 0), netSales: rows.reduce((sum, row) => sum + row.netSales, 0), netCost: rows.reduce((sum, row) => sum + row.netCost, 0), availableQuantity: rows.reduce((sum, row) => sum + row.availableQuantity, 0) }, staleItems, topSellingItems };
 }
 
 export async function getDashboardSummary(user: Pick<User, "id" | "role" | "regionId" | "branchId">) {
