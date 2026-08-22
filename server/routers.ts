@@ -189,6 +189,27 @@ export const appRouter = router({
       if (!db) throw new Error("Database unavailable");
       return db.select({ id: users.id, name: users.name, role: users.role }).from(users).limit(200);
     }),
+    adminList: roleProcedure(["admin"]).query(async () => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      return db.select({ id: users.id, openId: users.openId, name: users.name, email: users.email, role: users.role, regionId: users.regionId, branchId: users.branchId, createdAt: users.createdAt, lastSignedIn: users.lastSignedIn }).from(users).orderBy(users.name).limit(500);
+    }),
+    updateAccess: roleProcedure(["admin"]).input(z.object({
+      userId: z.number().int().positive(),
+      name: z.string().trim().min(2).max(160).optional(),
+      role: z.enum(["user", "admin", "area_manager", "branch_manager", "quality", "maintenance", "warehouse", "factory"]),
+      regionId: z.number().int().positive().nullable().optional(),
+      branchId: z.number().int().positive().nullable().optional(),
+    })).mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      const [current] = await db.select({ id: users.id, name: users.name, role: users.role, regionId: users.regionId, branchId: users.branchId }).from(users).where(eq(users.id, input.userId)).limit(1);
+      if (!current) throw new TRPCError({ code: "NOT_FOUND", message: "حساب المستخدم غير موجود" });
+      if (input.userId === ctx.user.id && input.role !== "admin") throw new TRPCError({ code: "BAD_REQUEST", message: "لا يمكن لمدير النظام خفض صلاحية حسابه الذاتي" });
+      await db.update(users).set({ name: input.name, role: input.role, regionId: input.regionId, branchId: input.branchId }).where(eq(users.id, input.userId));
+      await recordAudit(db, { actorId: ctx.user.id, entityType: "user_access", entityId: input.userId, action: "update", beforeData: current, afterData: input });
+      return { success: true };
+    }),
   }),
   notifications: router({
     list: protectedProcedure.query(async ({ ctx }) => { const db = await getDb(); if (!db) return []; return db.select().from(notifications).where(eq(notifications.recipientId, ctx.user.id)).orderBy(notifications.createdAt).limit(100); }),
@@ -348,6 +369,22 @@ export const appRouter = router({
       await db.update(branches).set(normalizedChanges).where(eq(branches.id, id));
       return { id, ...normalizedChanges };
     }),
+    importCoordinates: roleProcedure(["admin", "area_manager"]).input(z.object({ rows: z.array(z.object({ code: z.string().trim().min(1).max(32), latitude: z.number().min(-90).max(90), longitude: z.number().min(-180).max(180), coordinateSource: z.string().trim().min(1).max(120).default("CSV") })).min(1).max(500) })).mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      const visible = await listBranches(ctx.user);
+      const visibleCodes = new Set(visible.map(branch => branch.code));
+      const results: Array<{ code: string; updated: boolean; reason?: string }> = [];
+      for (const row of input.rows) {
+        if (!visibleCodes.has(row.code)) { results.push({ code: row.code, updated: false, reason: "غير موجود أو خارج نطاق الصلاحية" }); continue; }
+        const branch = visible.find(item => item.code === row.code);
+        if (!branch) { results.push({ code: row.code, updated: false, reason: "غير موجود" }); continue; }
+        await db.update(branches).set({ latitude: row.latitude.toFixed(7), longitude: row.longitude.toFixed(7), coordinateSource: row.coordinateSource, coordinatesVerifiedAt: new Date() }).where(eq(branches.id, branch.id));
+        await recordAudit(db, { actorId: ctx.user.id, branchId: branch.id, entityType: "branch_coordinates", entityId: branch.id, action: "update", beforeData: { latitude: branch.latitude, longitude: branch.longitude }, afterData: row });
+        results.push({ code: row.code, updated: true });
+      }
+      return { success: true, updated: results.filter(item => item.updated).length, rejected: results.filter(item => !item.updated).length, results };
+    }),
   }),
   costCenters: router({
     list: roleProcedure(["admin", "area_manager"]).query(async ({ ctx }) => {
@@ -413,6 +450,27 @@ export const appRouter = router({
       const id = Number(inserted[0].insertId);
       await recordAudit(db, { actorId: ctx.user.id, branchId: input.branchId, entityType: "financial_snapshot", entityId: id, action: "create", afterData: values });
       return { id, updated: false };
+    }),
+    generateDemoMonth: roleProcedure(["admin"]).input(z.object({ year: z.number().int().min(2000).max(2200), month: z.number().int().min(1).max(12), replaceExistingDemo: z.boolean().default(false) })).mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      const demoMarker = `[TEST_DATA ${input.year}-${String(input.month).padStart(2, "0")}]`;
+      const targetBranches = (await listBranches(ctx.user)).filter(branch => branch.operationalType === "branch");
+      let created = 0; let skipped = 0;
+      for (const branch of targetBranches) {
+        const existing = await db.select().from(branchFinancialSnapshots).where(eq(branchFinancialSnapshots.branchId, branch.id));
+        const match = existing.find(row => row.periodYear === input.year && row.periodMonth === input.month);
+        if (match && !(input.replaceExistingDemo && String(match.notes ?? "").startsWith("[TEST_DATA"))) { skipped++; continue; }
+        const base = 42000 + (branch.id % 17) * 2350;
+        const returns = Math.round(base * (0.012 + (branch.id % 3) * 0.002));
+        const cost = Math.round((base - returns) * (0.56 + (branch.id % 4) * 0.015));
+        const costReturns = Math.round(cost * 0.01);
+        const netSales = base - returns; const netCost = cost - costReturns; const margin = netSales - netCost; const expenses = Math.round(base * (0.12 + (branch.id % 3) * 0.01));
+        const values = { branchId: branch.id, periodYear: input.year, periodMonth: input.month, revenue: base.toFixed(2), salesReturns: returns.toFixed(2), netSales: netSales.toFixed(2), costOfGoods: cost.toFixed(2), costReturns: costReturns.toFixed(2), netCost: netCost.toFixed(2), netProfitMargin: margin.toFixed(2), operatingExpenses: expenses.toFixed(2), netProfit: (margin - expenses).toFixed(2), notes: demoMarker, source: "manual" as const, createdBy: ctx.user.id };
+        if (match) await db.update(branchFinancialSnapshots).set(values).where(eq(branchFinancialSnapshots.id, match.id)); else await db.insert(branchFinancialSnapshots).values(values);
+        created++;
+      }
+      return { success: true, created, skipped, marker: demoMarker };
     }),
     remove: roleProcedure(["admin", "area_manager", "branch_manager"]).input(z.object({ id: z.number().int().positive() })).mutation(async ({ input, ctx }) => {
       const db = await getDb();

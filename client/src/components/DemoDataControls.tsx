@@ -1,0 +1,15 @@
+import { useState } from "react";
+import { trpc } from "@/lib/trpc";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { FlaskConical, ShieldCheck } from "lucide-react";
+
+export function DemoDataControls() {
+  const now = new Date();
+  const [year, setYear] = useState(String(now.getFullYear()));
+  const [month, setMonth] = useState(String(now.getMonth() + 1));
+  const [result, setResult] = useState("");
+  const mutation = trpc.financials.generateDemoMonth.useMutation({ onSuccess: data => setResult(`تم إنشاء ${data.created} لقطة تجريبية، وتجاوز ${data.skipped} لقطة موجودة.`), onError: error => setResult(error.message) });
+  return <Card className="rounded-2xl border-[#dfe9df] bg-white"><CardHeader><CardTitle className="flex items-center gap-2 text-base"><FlaskConical className="h-4 w-4 text-[#2d7d58]" /> بيانات اختبار التقارير</CardTitle><p className="text-xs text-[#89948b]">تنشأ البيانات بعلامة TEST_DATA ولا تستبدل اللقطات الفعلية الموجودة.</p></CardHeader><CardContent className="space-y-4"><div className="grid gap-3 sm:grid-cols-2"><label className="text-xs text-[#5c7062]">السنة<input value={year} onChange={event => setYear(event.target.value)} type="number" min="2000" max="2200" className="mt-1 h-9 w-full rounded-lg border border-[#dfe9df] px-3" /></label><label className="text-xs text-[#5c7062]">الشهر<input value={month} onChange={event => setMonth(event.target.value)} type="number" min="1" max="12" className="mt-1 h-9 w-full rounded-lg border border-[#dfe9df] px-3" /></label></div><div className="flex flex-wrap items-center gap-2"><Button className="rounded-xl bg-[#2d7d58] hover:bg-[#256648]" disabled={mutation.isPending} onClick={() => mutation.mutate({ year: Number(year), month: Number(month), replaceExistingDemo: false })}>{mutation.isPending ? "جارٍ الإنشاء..." : "إنشاء بيانات شهر كامل"}</Button><Badge variant="outline" className="rounded-full border-[#cde1d3] text-[#2d7d58]"><ShieldCheck className="ml-1 h-3 w-3" /> معزولة عن البيانات الفعلية</Badge></div>{result && <p role="status" className="text-xs text-[#2d7d58]">{result}</p>}</CardContent></Card>;
+}
