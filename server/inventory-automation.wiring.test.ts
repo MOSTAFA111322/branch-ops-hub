@@ -22,6 +22,20 @@ describe("inventory automation wiring", () => {
     expect(view).toContain("مطابقة الأعمدة العربية تلقائيًا");
   });
 
+  it("exposes smart dashboard summary from refreshed inventory data", () => {
+    expect(db).toContain("smartInventorySummary");
+    expect(db).toContain("salesChangePercent");
+    expect(home).toContain("ملخص ذكي محدث");
+  });
+
+  it("supports advanced alert filters and report image/pdf export", () => {
+    expect(home).toContain("alertPriorityFilter");
+    expect(home).toContain("alertBranchFilter");
+    expect(home).toContain("alertTypeFilter");
+    expect(home).toContain("exportAlertsImage");
+    expect(home).toContain("exportAlertsPdf");
+  });
+
   it("feeds stale and low-stock inventory alerts into the dashboard", () => {
     expect(db).toContain("inventoryAlerts");
     expect(db).toContain("inventory_stale");

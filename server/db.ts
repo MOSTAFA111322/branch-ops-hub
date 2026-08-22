@@ -234,11 +234,11 @@ export async function getInventoryMovementAnalysis(user: Pick<User, "id" | "role
 
 export async function getDashboardSummary(user: Pick<User, "id" | "role" | "regionId" | "branchId">) {
   const db = await getDb();
-  if (!db) return { branches: [], activeBranchesCount: 0, inactiveBranchesCount: 0, representativesCount: 0, warehousesCount: 0, openActions: 0, upcomingVisits: 0, expiringDocuments: 0, openMaintenance: 0, tasks: [], alerts: [] };
+  if (!db) return { branches: [], activeBranchesCount: 0, inactiveBranchesCount: 0, representativesCount: 0, warehousesCount: 0, openActions: 0, upcomingVisits: 0, expiringDocuments: 0, openMaintenance: 0, tasks: [], alerts: [], smartInventorySummary: null };
   const allBranches = await db.select().from(branches).orderBy(desc(branches.healthScore));
   const visibleBranches = user.role === "admin" ? allBranches : allBranches.filter((branch) => user.branchId ? branch.id === user.branchId : user.regionId ? branch.regionId === user.regionId : false);
   const branchIds = visibleBranches.map((branch) => branch.id);
-  if (!branchIds.length && user.role !== "admin") return { branches: [], activeBranchesCount: 0, inactiveBranchesCount: 0, representativesCount: 0, warehousesCount: 0, openActions: 0, upcomingVisits: 0, expiringDocuments: 0, openMaintenance: 0, tasks: [], alerts: [] };
+  if (!branchIds.length && user.role !== "admin") return { branches: [], activeBranchesCount: 0, inactiveBranchesCount: 0, representativesCount: 0, warehousesCount: 0, openActions: 0, upcomingVisits: 0, expiringDocuments: 0, openMaintenance: 0, tasks: [], alerts: [], smartInventorySummary: null };
   const scope = user.role === "admin" ? undefined : inArray(correctiveActions.branchId, branchIds);
   const [branchRows, actionRows, visitRows, documentRows, maintenanceRows, taskRows, inventoryRows] = await Promise.all([
     Promise.resolve(visibleBranches),
@@ -257,6 +257,7 @@ export async function getDashboardSummary(user: Pick<User, "id" | "role" | "regi
     else if (row.available >= 0 && row.available <= 5 && row.sales > 0) alerts.push({ id: `inventory-low-${index}`, kind: "inventory_low", branchId: row.branchId ?? 0, title: `مخزون منخفض: ${row.itemName}`, detail: `${row.branchId ? branchName.get(row.branchId) ?? "فرع غير محدد" : "مركز غير محدد"} · المتاح ${row.available.toLocaleString("ar-SA")}`, tone: "rose" });
     return alerts;
   }, [] as Array<{ id: string; kind: "inventory_stale" | "inventory_low"; branchId: number; title: string; detail: string; tone: "amber" | "rose" }>);
+  const monthlyInventory = new Map<string, number>(); for (const row of inventoryRows) { const period = new Date(row.periodStart).toISOString().slice(0, 7); monthlyInventory.set(period, (monthlyInventory.get(period) ?? 0) + Number(row.netSales ?? 0)); } const periods = Array.from(monthlyInventory.keys()).sort(); const currentPeriod = periods.at(-1) ?? null; const previousPeriod = periods.at(-2) ?? null; const currentSales = currentPeriod ? monthlyInventory.get(currentPeriod) ?? 0 : 0; const previousSales = previousPeriod ? monthlyInventory.get(previousPeriod) ?? 0 : 0; const salesChangePercent = previousSales ? ((currentSales - previousSales) / Math.abs(previousSales)) * 100 : null; const staleItems = Array.from(inventoryGrouped.values()).filter((row) => row.available > 0 && row.sales <= 0).slice(0, 5).map((row) => ({ itemName: row.itemName, branchId: row.branchId, available: row.available })); const lowStockItems = Array.from(inventoryGrouped.values()).filter((row) => row.available >= 0 && row.available <= 5 && row.sales > 0).slice(0, 5).map((row) => ({ itemName: row.itemName, branchId: row.branchId, available: row.available }));
   const alerts = [
     ...documentRows.slice(0, 5).map((row) => ({ id: `document-${row.id}`, kind: "document" as const, branchId: row.branchId, title: row.title, detail: `${branchName.get(row.branchId) ?? "فرع غير محدد"} · وثيقة تحتاج انتباه`, tone: "rose" as const })),
     ...maintenanceRows.slice(0, 5).map((row) => ({ id: `maintenance-${row.id}`, kind: "maintenance" as const, branchId: row.branchId, title: row.title, detail: `${branchName.get(row.branchId) ?? "فرع غير محدد"} · بلاغ صيانة مفتوح`, tone: "amber" as const })),
@@ -281,5 +282,6 @@ export async function getDashboardSummary(user: Pick<User, "id" | "role" | "regi
     openMaintenance: maintenanceRows.length,
     tasks: taskRows,
     alerts,
+    smartInventorySummary: { currentPeriod, previousPeriod, currentSales, previousSales, salesChangePercent, staleCount: staleItems.length, lowStockCount: lowStockItems.length, staleItems, lowStockItems },
   };
 }
