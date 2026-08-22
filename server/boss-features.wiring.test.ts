@@ -19,4 +19,13 @@ describe("Boss-level operational extensions", () => {
     expect(source).toContain("saveDashboardPreference");
     expect(source).toContain("تخصيص مؤشرات دورك");
   });
+
+  it("shows actionable area-manager success indicators from live data", () => {
+    const source = readFileSync(resolve(process.cwd(), "client/src/pages/Home.tsx"), "utf8");
+    expect(source).toContain('user?.role === "area_manager"');
+    expect(source).toContain("مؤشرات النجاح القابلة للإجراء");
+    expect(source).toContain("liveSummary?.openActions");
+    expect(source).toContain("liveSummary?.upcomingVisits");
+    expect(source).toContain("healthyBranches");
+  });
 });

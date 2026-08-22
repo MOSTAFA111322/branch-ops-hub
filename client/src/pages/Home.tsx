@@ -509,12 +509,25 @@ export default function Home() {
   const paletteBranches = useMemo(() => displayBranches.slice(0, 20).map((branch) => ({ id: `branch-${branch.id}`, label: `${branch.code ?? ""} ${branch.name}`.trim(), detail: branch.area, onSelect: () => { setSelectedBranch(branch); setActiveNav("الفروع"); } })), [displayBranches]);
   const paletteTasks = useMemo(() => (liveSummary?.tasks ?? []).slice(0, 12).map((task) => ({ id: `task-${task.id}`, label: String(task.title ?? "مهمة تشغيلية"), detail: `فرع ${task.branchId ?? "—"} · ${task.status ?? "قيد المتابعة"}`, onSelect: () => setActiveNav("المهام والطلبات") })), [liveSummary]);
   const paletteAlerts = useMemo(() => dashboardAlerts.slice(0, 12).map((alert) => ({ id: String(alert.id), label: alert.title, detail: alert.detail, onSelect: () => { setActiveNav(getAlertNavigationTarget(alert.kind)); if (alert.branchId) { const branch = displayBranches.find((item) => item.id === alert.branchId); if (branch) setSelectedBranch(branch); } } })), [dashboardAlerts, displayBranches]);
-  const paletteQuickActions = useMemo(() => [
+    const paletteQuickActions = useMemo(() => [
     { id: "quick-create", label: "إضافة سجل في الوحدة الحالية", detail: "فتح الإجراء السريع", onSelect: () => setShowQuickAction(true) },
     { id: "quick-visit", label: "جدولة زيارة ميدانية", detail: "الزيارات والفحص", onSelect: () => { setActiveNav("الزيارات والفحص"); setShowQuickAction(true); } },
     { id: "quick-task", label: "إنشاء مهمة تشغيلية", detail: "المهام والطلبات", onSelect: () => { setActiveNav("المهام والطلبات"); setShowQuickAction(true); } },
   ], [activeNav]);
-
+  const areaManagerIndicators = useMemo(() => {
+    const branches = displayBranches.filter((branch) => branch.operationalType === "branch" || !branch.operationalType);
+    const averageHealth = branches.length ? Math.round(branches.reduce((sum, branch) => sum + Number(branch.score ?? 0), 0) / branches.length) : null;
+    const healthyBranches = branches.filter((branch) => Number(branch.score ?? 0) >= 80).length;
+    const openActions = Number(liveSummary?.openActions ?? 0);
+    const upcomingVisits = Number(liveSummary?.upcomingVisits ?? 0);
+    const dataReady = branches.length > 0 && branches.every((branch) => Boolean(branch.name && branch.code));
+    return [
+      { label: "صحة الفروع", value: averageHealth === null ? "—" : `${averageHealth}%`, target: "الهدف ≥ 80%", detail: `${healthyBranches} من ${branches.length} ضمن الهدف`, good: averageHealth !== null && averageHealth >= 80 },
+      { label: "الإجراءات المفتوحة", value: String(openActions), target: "الهدف: اتجاه تنازلي", detail: openActions === 0 ? "لا توجد إجراءات متأخرة" : "تحتاج ترتيب الأولويات", good: openActions === 0 },
+      { label: "الزيارات القادمة", value: String(upcomingVisits), target: "الهدف: خطة متابعة نشطة", detail: upcomingVisits > 0 ? "يوجد موعد متابعة قادم" : "أضف زيارة للفروع ذات الأولوية", good: upcomingVisits > 0 },
+      { label: "جاهزية بيانات الفروع", value: dataReady ? "100%" : "تحتاج مراجعة", target: "الهدف: رمز واسم لكل فرع", detail: dataReady ? `${branches.length} فرعًا جاهزًا للمتابعة` : "توجد بيانات أساسية ناقصة", good: dataReady },
+    ];
+  }, [displayBranches, liveSummary?.openActions, liveSummary?.upcomingVisits]);
   return (
     <>
       <GlobalCommandPalette open={commandOpen} onOpenChange={setCommandOpen} branches={paletteBranches} tasks={paletteTasks} alerts={paletteAlerts} navigation={paletteNavigation} quickActions={paletteQuickActions} />
@@ -591,6 +604,7 @@ export default function Home() {
           {activeNav === "البيانات المالية" ? <FinancialSnapshotsView user={user} /> : activeNav === "التقارير" ? <ReportApprovalView /> : activeNav === "إدارة التقارير الدورية" ? <ScheduledReportsView canRetry={user?.role === "admin"} /> : activeNav === "سجل التدقيق" ? <AuditLogView /> : activeNav === "سجل التنبيهات" ? <AlertHistoryView /> : activeNav !== "نظرة عامة" && <OperationsView section={activeNav} user={user} onNavigate={setActiveNav} />}
 
           <section className="rounded-2xl border border-[#dfe9df] bg-[#f8fbf8] p-3" aria-label="تخصيص مؤشرات اللوحة"><div className="flex flex-wrap items-center gap-2"><span className="text-xs font-semibold text-[#315542]">تخصيص مؤشرات دورك</span>{["الفروع النشطة", "المندوبون والمستودعات", "إجراءات مفتوحة", "الزيارات المجدولة", "وثائق تحتاج انتباه"].map((label) => <label key={label} className="inline-flex cursor-pointer items-center gap-1 rounded-lg bg-white px-2 py-1 text-[10px] text-[#617167]"><input type="checkbox" checked={visibleWidgets[label] !== false} onChange={() => toggleWidget(label)} />{label}</label>)}</div></section>
+          {user?.role === "area_manager" && <section className="mb-4 rounded-2xl border border-[#dfe9df] bg-[#eef8f0] p-5 shadow-[0_5px_18px_rgba(39,70,48,0.04)]" aria-label="مؤشرات نجاح مدير المنطقة"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold text-[#4d8068]">لوحة مدير المنطقة</p><h2 className="mt-1 text-lg font-bold text-[#174c3d]">مؤشرات النجاح القابلة للإجراء</h2><p className="mt-1 text-xs text-[#6b8172]">ملخص مباشر يساعدك على تحديد الفرع أو الإجراء التالي، دون مؤشرات ثابتة أو بيانات تجريبية.</p></div><Button variant="outline" size="sm" className="rounded-xl border-[#c8dfcc] bg-white text-xs text-[#2d7d58]" onClick={() => setActiveNav("الفروع")}>فتح دليل الفروع <ArrowDownLeft className="mr-1 h-3.5 w-3.5" /></Button></div><div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{areaManagerIndicators.map((indicator) => <div key={indicator.label} className="rounded-xl border border-white/80 bg-white p-3"><div className="flex items-center justify-between gap-2"><span className="text-xs font-semibold text-[#315542]">{indicator.label}</span><span className={`rounded-full px-2 py-1 text-[10px] font-bold ${indicator.good ? "bg-[#e4f4e7] text-[#2d7d58]" : "bg-[#fff0e8] text-[#a45b4e]"}`}>{indicator.good ? "ضمن الهدف" : "تحتاج متابعة"}</span></div><p className="mt-3 text-xl font-bold text-[#174c3d]">{indicator.value}</p><p className="mt-1 text-[10px] font-semibold text-[#6f8577]">{indicator.target}</p><p className="mt-2 text-[10px] text-[#89948b]">{indicator.detail}</p></div>)}</div></section>}
           <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             {[
               { label: "الفروع النشطة", value: liveSummary ? String(liveSummary.activeBranchesCount) : "—", change: liveSummary ? `${liveSummary.inactiveBranchesCount} غير نشط` : "بانتظار البيانات", hint: "فروع التشغيل فقط", icon: Building2, tone: "green", progress: liveSummary?.activeBranchesCount ? Math.min(100, liveSummary.activeBranchesCount * 10) : 0 },
