@@ -8,7 +8,7 @@ import { registerStorageProxy } from "./storageProxy";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
-import { commandUsageDigestHandler, monthlyFinancialReportHandler, weeklyExecutiveDigestHandler } from "../scheduled";
+import { commandUsageDigestHandler, inventoryAlertsHandler, monthlyFinancialReportHandler, weeklyExecutiveDigestHandler } from "../scheduled";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -38,6 +38,7 @@ async function startServer() {
   registerStorageProxy(app);
   registerOAuthRoutes(app);
   app.post("/api/scheduled/monthly-financial-report", monthlyFinancialReportHandler);
+  app.post("/api/scheduled/inventory-alerts", inventoryAlertsHandler);
   app.post("/api/scheduled/command-usage-digest", commandUsageDigestHandler);
   app.post("/api/scheduled/weekly-executive-digest", weeklyExecutiveDigestHandler);
   // tRPC API

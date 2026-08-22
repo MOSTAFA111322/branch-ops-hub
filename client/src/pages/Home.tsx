@@ -663,7 +663,7 @@ export default function Home() {
     [displayBranches, query],
   );
   const networkHealth = displayBranches.length ? Math.round(displayBranches.reduce((sum, branch) => sum + branch.score, 0) / displayBranches.length) : 0;
-  const dashboardAlerts = useMemo(() => [...(liveSummary?.alerts ?? []), ...checklistAlerts].map((alert) => ({ ...alert, icon: alert.kind === "document" ? FileText : alert.kind === "maintenance" ? Wrench : alert.kind === "visit" || alert.kind === "checklist" ? ClipboardCheck : AlertTriangle })), [liveSummary, checklistAlerts]);
+  const dashboardAlerts = useMemo(() => ([...(liveSummary?.alerts ?? []), ...checklistAlerts] as any[]).map((alert) => ({ ...alert, icon: alert.kind === "document" ? FileText : alert.kind === "maintenance" ? Wrench : alert.kind === "visit" || alert.kind === "checklist" ? ClipboardCheck : AlertTriangle })), [liveSummary, checklistAlerts]);
   const paletteNavigation = useMemo(() => navItems.filter((item) => canAccessNav(item.label, user?.role)).map((item) => ({ id: `nav-${item.label}`, label: item.label, onSelect: () => setActiveNav(item.label) })), [user?.role]);
   const paletteBranches = useMemo(() => displayBranches.slice(0, 20).map((branch) => ({ id: `branch-${branch.id}`, label: `${branch.code ?? ""} ${branch.name}`.trim(), detail: branch.area, onSelect: () => { setSelectedBranch(branch); setActiveNav("الفروع"); } })), [displayBranches]);
   const paletteTasks = useMemo(() => (liveSummary?.tasks ?? []).slice(0, 12).map((task) => ({ id: `task-${task.id}`, label: String(task.title ?? "مهمة تشغيلية"), detail: `فرع ${task.branchId ?? "—"} · ${task.status ?? "قيد المتابعة"}`, onSelect: () => setActiveNav("المهام والطلبات") })), [liveSummary]);

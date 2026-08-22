@@ -3,9 +3,47 @@ import { eq, inArray } from "drizzle-orm";
 import { getDb } from "./db";
 import { sdk } from "./_core/sdk";
 import { notifyOwner } from "./_core/notification";
-import { auditLogs, branchFinancialSnapshots, branches, users, scheduledReportRecipients, scheduledReportDeliveries, notifications, tasks, qualityCases, maintenanceTickets } from "../drizzle/schema";
+import { auditLogs, branchFinancialSnapshots, branches, users, scheduledReportRecipients, scheduledReportDeliveries, notifications, tasks, qualityCases, maintenanceTickets, inventoryMovementSnapshots } from "../drizzle/schema";
 
 export const MONTHLY_REPORT_RECIPIENT_ROLES = ["admin", "area_manager", "quality"] as const;
+
+/** Daily idempotent inventory alert refresh for Heartbeat. */
+export async function inventoryAlertsHandler(req: Request, res: Response) {
+  const context = { url: req.originalUrl, timestamp: new Date().toISOString() };
+  try {
+    const user = await sdk.authenticateRequest(req);
+    if (!user.isCron || !user.taskUid) return res.status(403).json({ error: "cron-only" });
+    const db = await getDb();
+    if (!db) return res.status(503).json({ error: "database-unavailable", context });
+    const marker = `inventory-alerts:${new Date().toISOString().slice(0, 10)}`;
+    const existingAudit = await db.select({ id: auditLogs.id }).from(auditLogs).where(eq(auditLogs.action, marker)).limit(1);
+    if (existingAudit.length) return res.json({ ok: true, skipped: "already-refreshed", marker });
+    const [rows, branchRows, recipients] = await Promise.all([
+      db.select().from(inventoryMovementSnapshots),
+      db.select({ id: branches.id, name: branches.name }).from(branches),
+      db.select({ id: users.id }).from(users).where(inArray(users.role, ["admin", "area_manager"] as any)),
+    ]);
+    const branchNames = new Map(branchRows.map((branch) => [branch.id, branch.name]));
+    const grouped = new Map<string, { itemName: string; branchId: number | null; available: number; sales: number }>();
+    for (const row of rows) {
+      const key = `${row.itemCode}|${row.costCenterCode}|${row.branchId ?? ""}`;
+      const current = grouped.get(key) ?? { itemName: row.itemName, branchId: row.branchId, available: 0, sales: 0 };
+      current.available += Number(row.availableQuantity ?? 0); current.sales += Number(row.salesQuantity ?? 0); grouped.set(key, current);
+    }
+    const alerts = Array.from(grouped.values()).filter((row) => (row.available > 0 && row.sales <= 0) || (row.available >= 0 && row.available <= 5 && row.sales > 0)).slice(0, 50);
+    for (const row of alerts) {
+      const stale = row.sales <= 0;
+      const title = stale ? `صنف راكد: ${row.itemName}` : `مخزون منخفض: ${row.itemName}`;
+      const content = `${row.branchId ? branchNames.get(row.branchId) ?? "فرع غير محدد" : "مركز غير محدد"} · المتاح ${row.available.toLocaleString("ar-SA")}${stale ? " · دون مبيعات" : ""}`;
+      if (recipients.length) await db.insert(notifications).values(recipients.map((recipient) => ({ recipientId: recipient.id, kind: stale ? "inventory_stale" : "inventory_low", title, content, entityType: "inventory" })));
+      await db.insert(tasks).values({ branchId: row.branchId, assigneeId: null, title: `متابعة ${title}`, priority: stale ? "medium" : "high", status: "todo" });
+    }
+    await db.insert(auditLogs).values({ actorId: user.id > 0 ? user.id : null, action: marker, entityType: "inventory_alert_refresh", afterData: JSON.stringify({ marker, alerts: alerts.length, taskUid: user.taskUid }) });
+    return res.json({ ok: true, marker, alerts: alerts.length });
+  } catch (error) {
+    return res.status(500).json({ error: error instanceof Error ? error.message : String(error), context });
+  }
+}
 
 async function resolveReportRecipients(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, taskUid: string, fallbackRoles: readonly string[]) {
   const configured = await db.select({ id: users.id, name: users.name, email: users.email, role: users.role }).from(scheduledReportRecipients).innerJoin(users, eq(users.id, scheduledReportRecipients.recipientId)).where(eq(scheduledReportRecipients.taskUid, taskUid));

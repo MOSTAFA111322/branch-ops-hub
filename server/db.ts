@@ -240,21 +240,30 @@ export async function getDashboardSummary(user: Pick<User, "id" | "role" | "regi
   const branchIds = visibleBranches.map((branch) => branch.id);
   if (!branchIds.length && user.role !== "admin") return { branches: [], activeBranchesCount: 0, inactiveBranchesCount: 0, representativesCount: 0, warehousesCount: 0, openActions: 0, upcomingVisits: 0, expiringDocuments: 0, openMaintenance: 0, tasks: [], alerts: [] };
   const scope = user.role === "admin" ? undefined : inArray(correctiveActions.branchId, branchIds);
-  const [branchRows, actionRows, visitRows, documentRows, maintenanceRows, taskRows] = await Promise.all([
+  const [branchRows, actionRows, visitRows, documentRows, maintenanceRows, taskRows, inventoryRows] = await Promise.all([
     Promise.resolve(visibleBranches),
     scope ? db.select().from(correctiveActions).where(scope) : db.select().from(correctiveActions).where(eq(correctiveActions.status, "open")),
     user.role === "admin" ? db.select().from(visits).where(eq(visits.status, "scheduled")) : db.select().from(visits).where(inArray(visits.branchId, branchIds)),
     user.role === "admin" ? db.select().from(documents).where(eq(documents.status, "expiring")) : db.select().from(documents).where(inArray(documents.branchId, branchIds)),
     user.role === "admin" ? db.select().from(maintenanceTickets).where(eq(maintenanceTickets.status, "open")) : db.select().from(maintenanceTickets).where(inArray(maintenanceTickets.branchId, branchIds)),
     db.select().from(tasks).where(eq(tasks.status, "todo")).orderBy(desc(tasks.createdAt)).limit(8),
+    user.role === "admin" ? db.select().from(inventoryMovementSnapshots) : db.select().from(inventoryMovementSnapshots).where(inArray(inventoryMovementSnapshots.branchId, branchIds)),
   ]);
   const branchName = new Map(visibleBranches.map((branch) => [branch.id, branch.name]));
+  const inventoryGrouped = new Map<string, { itemName: string; branchId: number | null; available: number; sales: number }>();
+  for (const row of inventoryRows) { const key = `${row.itemCode}::${row.costCenterCode}`; const current = inventoryGrouped.get(key) ?? { itemName: row.itemName, branchId: row.branchId, available: 0, sales: 0 }; current.available += Number(row.availableQuantity ?? 0); current.sales += Number(row.salesQuantity ?? 0); inventoryGrouped.set(key, current); }
+  const inventoryAlerts: Array<{ id: string; kind: "inventory_stale" | "inventory_low"; branchId: number; title: string; detail: string; tone: "amber" | "rose" }> = Array.from(inventoryGrouped.values()).reduce((alerts, row, index) => {
+    if (row.available > 0 && row.sales <= 0) alerts.push({ id: `inventory-stale-${index}`, kind: "inventory_stale", branchId: row.branchId ?? 0, title: `صنف راكد: ${row.itemName}`, detail: `${row.branchId ? branchName.get(row.branchId) ?? "فرع غير محدد" : "مركز غير محدد"} · متاح ${row.available.toLocaleString("ar-SA")} دون مبيعات`, tone: "amber" });
+    else if (row.available >= 0 && row.available <= 5 && row.sales > 0) alerts.push({ id: `inventory-low-${index}`, kind: "inventory_low", branchId: row.branchId ?? 0, title: `مخزون منخفض: ${row.itemName}`, detail: `${row.branchId ? branchName.get(row.branchId) ?? "فرع غير محدد" : "مركز غير محدد"} · المتاح ${row.available.toLocaleString("ar-SA")}`, tone: "rose" });
+    return alerts;
+  }, [] as Array<{ id: string; kind: "inventory_stale" | "inventory_low"; branchId: number; title: string; detail: string; tone: "amber" | "rose" }>);
   const alerts = [
     ...documentRows.slice(0, 5).map((row) => ({ id: `document-${row.id}`, kind: "document" as const, branchId: row.branchId, title: row.title, detail: `${branchName.get(row.branchId) ?? "فرع غير محدد"} · وثيقة تحتاج انتباه`, tone: "rose" as const })),
     ...maintenanceRows.slice(0, 5).map((row) => ({ id: `maintenance-${row.id}`, kind: "maintenance" as const, branchId: row.branchId, title: row.title, detail: `${branchName.get(row.branchId) ?? "فرع غير محدد"} · بلاغ صيانة مفتوح`, tone: "amber" as const })),
     ...visitRows.slice(0, 5).map((row) => ({ id: `visit-${row.id}`, kind: "visit" as const, branchId: row.branchId, title: "زيارة ميدانية مجدولة", detail: `${branchName.get(row.branchId) ?? "فرع غير محدد"} · ${row.scheduledAt ? new Date(row.scheduledAt).toLocaleDateString("ar-SA") : "موعد غير محدد"}`, tone: "blue" as const })),
     ...actionRows.filter((row) => row.status === "open").slice(0, 5).map((row) => ({ id: `action-${row.id}`, kind: "action" as const, branchId: row.branchId, title: row.title, detail: `${branchName.get(row.branchId) ?? "فرع غير محدد"} · إجراء مفتوح`, tone: "orange" as const })),
     ...taskRows.filter((row) => row.status !== "done" && row.dueAt && new Date(row.dueAt).getTime() < Date.now()).slice(0, 5).map((row) => ({ id: `task-overdue-${row.id}`, kind: "task" as const, branchId: row.branchId ?? 0, title: row.title, detail: `${row.branchId ? branchName.get(row.branchId) ?? "فرع غير محدد" : "مهمة عامة"} · مهمة متأخرة وتحتاج تصعيدًا`, tone: "rose" as const })),
+    ...inventoryAlerts.slice(0, 10),
   ];
   const activeBranchesCount = visibleBranches.filter((branch) => branch.operationalType === "branch" && branch.status === "active").length;
   const inactiveBranchesCount = visibleBranches.filter((branch) => branch.operationalType === "branch" && branch.status !== "active").length;

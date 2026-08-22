@@ -8,7 +8,7 @@ import { and, eq, inArray, isNull } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { getBranchById, getBranchProfile, getDashboardSummary, getInventoryMovementAnalysis, getOperationsOverview, listBranches, getDb } from "./db";
 import { retryCommandUsageDigest, retryScheduledReportDelivery } from "./scheduled";
-import { branches, regions, branchAssets, branchFinancialSnapshots, checklistItems, checklistTemplates, correctiveActions, dashboardPreferences, documentVersions, documents, internalRequests, maintenanceTickets, qualityCases, tasks, users, visitChecklistResults, visits, auditLogs, notifications, reportApprovals, scheduledReportRecipients, scheduledReportDeliveries, costCenterMappings } from "../drizzle/schema";
+import { branches, regions, branchAssets, branchFinancialSnapshots, checklistItems, checklistTemplates, correctiveActions, dashboardPreferences, documentVersions, documents, internalRequests, maintenanceTickets, qualityCases, tasks, users, visitChecklistResults, visits, auditLogs, notifications, reportApprovals, scheduledReportRecipients, scheduledReportDeliveries, costCenterMappings, inventoryMovementSnapshots } from "../drizzle/schema";
 import { aggregateFinancialComparison } from "../shared/financials";
 import { invokeLLM } from "./_core/llm";
 
@@ -55,6 +55,18 @@ export const appRouter = router({
         from: input.from ? new Date(`${input.from}T00:00:00.000Z`) : undefined,
         to: input.to ? new Date(`${input.to}T23:59:59.999Z`) : undefined,
       });
+    }),
+    importRows: roleProcedure(["admin", "area_manager", "warehouse"]).input(z.object({ rows: z.array(z.object({ branchId: z.number().int().positive().nullable().optional(), sourceFileName: z.string().trim().min(1).max(255), sourceSheet: z.string().trim().min(1).max(120), costCenterCode: z.string().trim().min(1).max(80), periodStart: z.string().date(), periodEnd: z.string().date(), itemCode: z.string().trim().min(1).max(80), itemName: z.string().trim().min(1).max(240), availableQuantity: z.number().finite().default(0), salesQuantity: z.number().finite().default(0), netSales: z.number().finite().default(0), netCost: z.number().finite().default(0), returnQuantity: z.number().finite().default(0), returnValue: z.number().finite().default(0), availableCost: z.number().finite().default(0) })).min(1).max(5000), dryRun: z.boolean().default(false) })).mutation(async ({ input, ctx }) => {
+      const db = await getDb(); if (!db) throw new Error("Database unavailable");
+      const visibleBranches = await listBranches(ctx.user); const visibleIds = new Set(visibleBranches.map((branch) => branch.id));
+      const validRows = input.rows.filter((row) => !row.branchId || visibleIds.has(row.branchId));
+      if (validRows.length !== input.rows.length) throw new TRPCError({ code: "FORBIDDEN", message: "يتضمن الملف فروعًا خارج نطاق صلاحيتك." });
+      const existing = await db.select({ branchId: inventoryMovementSnapshots.branchId, costCenterCode: inventoryMovementSnapshots.costCenterCode, periodStart: inventoryMovementSnapshots.periodStart, periodEnd: inventoryMovementSnapshots.periodEnd, itemCode: inventoryMovementSnapshots.itemCode }).from(inventoryMovementSnapshots);
+      const key = (row: { branchId?: number | null; costCenterCode: string; periodStart: string | Date; periodEnd: string | Date; itemCode: string }) => `${row.branchId ?? ""}|${row.costCenterCode}|${new Date(row.periodStart).toISOString().slice(0, 10)}|${new Date(row.periodEnd).toISOString().slice(0, 10)}|${row.itemCode}`;
+      const existingKeys = new Set(existing.map(key)); const seen = new Set<string>(); const newRows = validRows.filter((row) => { const k = key(row); if (existingKeys.has(k) || seen.has(k)) return false; seen.add(k); return true; });
+      if (!input.dryRun && newRows.length) await db.insert(inventoryMovementSnapshots).values(newRows.map((row) => ({ ...row, periodStart: new Date(`${row.periodStart}T00:00:00.000Z`), periodEnd: new Date(`${row.periodEnd}T23:59:59.999Z`), availableQuantity: String(row.availableQuantity), salesQuantity: String(row.salesQuantity), netSales: String(row.netSales), netCost: String(row.netCost), returnQuantity: String(row.returnQuantity), returnValue: String(row.returnValue), availableCost: String(row.availableCost) })));
+      if (!input.dryRun && newRows.length) await recordAudit(db, { actorId: ctx.user.id, entityType: "inventory_import", action: "import", afterData: { received: input.rows.length, inserted: newRows.length, duplicates: input.rows.length - newRows.length } });
+      return { received: input.rows.length, inserted: newRows.length, duplicates: input.rows.length - newRows.length, dryRun: input.dryRun };
     }),
   }),
   assistant: router({
