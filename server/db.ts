@@ -183,7 +183,7 @@ export async function getOperationsOverview(user: Pick<User, "id" | "role" | "re
   });
   const qualitySummary = { averageCompletenessRate: dataQuality.length ? Math.round(dataQuality.reduce((sum, item) => sum + item.completenessRate, 0) / dataQuality.length) : null, branchesNeedingData: dataQuality.filter((item) => item.missingFields.length > 0).length, averageVisitCommitmentRate: (() => { const rows = dataQuality.filter((item) => item.visitCommitmentRate !== null); return rows.length ? Math.round(rows.reduce((sum, item) => sum + (item.visitCommitmentRate ?? 0), 0) / rows.length) : null; })() };
   const comparison = visible.map((branch, index) => ({ id: branch.id, name: branch.name, city: branch.city, healthScore: branch.healthScore, openActions: branch.openActions, riskLevel: Number(branch.healthScore) < 75 ? "مرتفع" : Number(branch.healthScore) < 85 ? "متوسط" : "مستقر", activityCount: activityRows.filter((row) => row.branchId === branch.id).length, period, rank: index + 1 }));
-  const visibleFinancialRows = (user.role === "admin" ? financialRows : financialRows.filter((row) => ids.includes(row.branchId))) as Array<{ branchId: number; periodYear: number; periodMonth: number; revenue: string | number; netProfit: string | number }>;
+  const visibleFinancialRows = (user.role === "admin" ? financialRows : financialRows.filter((row) => ids.includes(row.branchId))) as Array<{ branchId: number; periodYear: number; periodMonth: number; revenue: string | number; netProfit: string | number; operatingExpenses?: string | number }>;
   const trendMap = new Map<string, { period: string; year: number; month: number; revenue: number; netProfit: number; branches: number }>();
   for (const row of visibleFinancialRows) {
     const key = `${row.periodYear}-${String(row.periodMonth).padStart(2, "0")}`;
@@ -194,12 +194,13 @@ export async function getOperationsOverview(user: Pick<User, "id" | "role" | "re
     trendMap.set(key, current);
   }
   const financialTrend = Array.from(trendMap.values()).sort((a, b) => a.period.localeCompare(b.period)).slice(-12);
-  const branchFinancialMap = new Map<number, { id: number; name: string; city: string; operationalType: string; januaryRevenue: number | null; februaryRevenue: number | null; januaryProfit: number | null; februaryProfit: number | null }>();
-  for (const branch of visible) branchFinancialMap.set(branch.id, { id: branch.id, name: branch.name, city: branch.city, operationalType: branch.operationalType ?? "branch", januaryRevenue: null, februaryRevenue: null, januaryProfit: null, februaryProfit: null });
+  const branchFinancialMap = new Map<number, { id: number; name: string; city: string; operationalType: string; januaryRevenue: number | null; februaryRevenue: number | null; januaryProfit: number | null; februaryProfit: number | null; operatingExpenses: number }>();
+  for (const branch of visible) branchFinancialMap.set(branch.id, { id: branch.id, name: branch.name, city: branch.city, operationalType: branch.operationalType ?? "branch", januaryRevenue: null, februaryRevenue: null, januaryProfit: null, februaryProfit: null, operatingExpenses: 0 });
   for (const row of visibleFinancialRows) {
     const item = branchFinancialMap.get(row.branchId); if (!item) continue;
     if (row.periodYear === 2026 && row.periodMonth === 1) { item.januaryRevenue = Number(row.revenue ?? 0); item.januaryProfit = Number(row.netProfit ?? 0); }
     if (row.periodYear === 2026 && row.periodMonth === 2) { item.februaryRevenue = Number(row.revenue ?? 0); item.februaryProfit = Number(row.netProfit ?? 0); }
+    item.operatingExpenses += Number(row.operatingExpenses ?? 0);
   }
   const financialByBranch = Array.from(branchFinancialMap.values()).map((item) => ({ ...item, revenueChangePercent: item.januaryRevenue ? Math.round(((item.februaryRevenue ?? 0) - item.januaryRevenue) / item.januaryRevenue * 1000) / 10 : null, profitChangePercent: item.januaryProfit ? Math.round(((item.februaryProfit ?? 0) - item.januaryProfit) / item.januaryProfit * 1000) / 10 : null }));
   return { comparison, financialTrend, financialByBranch, visits: visitsRows, actions: actionRows, documents: documentRows, qualityCases: qualityRows, qualityAnalysis, operationalSummary, previousOperationalSummary, operationalComparison, dataQuality, qualitySummary, maintenanceTickets: maintenanceRows, requests: scopedRequests, tasks: scopedTasks, tasksAndRequests: [...scopedTasks, ...scopedRequests] };
@@ -222,8 +223,8 @@ export async function getInventoryMovementAnalysis(user: Pick<User, "id" | "role
   const monthlyGroups = new Map<string, any>();
   for (const row of filtered) {
     const key = `${row.itemCode}::${row.costCenterCode}`;
-    const current = groups.get(key) ?? { itemCode: row.itemCode, itemName: row.itemName, costCenterCode: row.costCenterCode, salesQuantity: 0, netSales: 0, netCost: 0, availableQuantity: 0, stockAgeDays: 0, rowCount: 0 };
-    current.salesQuantity += Number(row.salesQuantity ?? 0); current.netSales += Number(row.netSales ?? 0); current.netCost += Number(row.netCost ?? 0); current.availableQuantity += Number(row.availableQuantity ?? 0); current.stockAgeDays = Math.max(current.stockAgeDays, Number(row.stockAgeDays ?? 0)); current.rowCount += 1;
+    const current = groups.get(key) ?? { itemCode: row.itemCode, itemName: row.itemName, costCenterCode: row.costCenterCode, salesQuantity: 0, netSales: 0, netCost: 0, availableQuantity: 0, availableCost: 0, stockAgeDays: 0, rowCount: 0 };
+    current.salesQuantity += Number(row.salesQuantity ?? 0); current.netSales += Number(row.netSales ?? 0); current.netCost += Number(row.netCost ?? 0); current.availableQuantity += Number(row.availableQuantity ?? 0); current.availableCost += Number(row.availableCost ?? 0); current.stockAgeDays = Math.max(current.stockAgeDays, Number(row.stockAgeDays ?? 0)); current.rowCount += 1;
     groups.set(key, current);
     const month = new Date(row.periodStart).toISOString().slice(0, 7);
     const monthlyKey = `${month}::${row.itemCode}::${row.costCenterCode}`;
@@ -231,9 +232,9 @@ export async function getInventoryMovementAnalysis(user: Pick<User, "id" | "role
     monthlyCurrent.salesQuantity += Number(row.salesQuantity ?? 0); monthlyCurrent.netSales += Number(row.netSales ?? 0); monthlyCurrent.netCost += Number(row.netCost ?? 0); monthlyCurrent.availableQuantity += Number(row.availableQuantity ?? 0); monthlyCurrent.rowCount += 1;
     monthlyGroups.set(monthlyKey, monthlyCurrent);
   }
-  const rows = Array.from(groups.values()).map((row) => ({ ...row, grossMargin: row.netSales - row.netCost, marginRate: row.netSales ? ((row.netSales - row.netCost) / row.netSales) * 100 : null })).sort((a, b) => b.netSales - a.netSales);
+  const rows = Array.from(groups.values()).map((row) => ({ ...row, staleValue: row.availableCost, grossMargin: row.netSales - row.netCost, marginRate: row.netSales ? ((row.netSales - row.netCost) / row.netSales) * 100 : null })).sort((a, b) => b.netSales - a.netSales);
   const staleItems = rows.filter((row) => row.salesQuantity <= 0 && row.availableQuantity > 0).sort((a, b) => b.availableQuantity - a.availableQuantity).slice(0, 50);
-  const topSellingItems = rows.filter((row) => row.salesQuantity > 0).slice(0, 50);
+  const topSellingItems = [...rows].filter((row) => row.salesQuantity > 0).sort((a, b) => b.grossMargin - a.grossMargin).slice(0, 50);
   const monthlyReport = Array.from(monthlyGroups.values()).map((row) => ({ ...row, grossMargin: row.netSales - row.netCost, marginRate: row.netSales ? ((row.netSales - row.netCost) / row.netSales) * 100 : null })).sort((a, b) => a.period.localeCompare(b.period) || b.netSales - a.netSales).slice(0, 1000);
   return { rows: rows.slice(0, 500), monthlyReport, totals: { salesQuantity: rows.reduce((sum, row) => sum + row.salesQuantity, 0), netSales: rows.reduce((sum, row) => sum + row.netSales, 0), netCost: rows.reduce((sum, row) => sum + row.netCost, 0), availableQuantity: rows.reduce((sum, row) => sum + row.availableQuantity, 0) }, staleItems, topSellingItems };
 }

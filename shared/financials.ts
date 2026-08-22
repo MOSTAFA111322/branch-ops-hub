@@ -14,7 +14,7 @@ export function calculateNetMargin({ grossSales, salesReturns = 0, grossCost, co
 export type ComparisonLocation = { id: number; operationalType?: string | null };
 
 export function filterSalesCenters<T extends { operationalType?: string | null }>(locations: T[]) {
-  return locations.filter((location) => (location.operationalType ?? "branch") === "branch");
+  return locations.filter((location) => { const type = location.operationalType ?? "branch"; return type === "branch" || type === "فرع"; });
 }
 export type ComparisonSnapshot = { branchId: number; periodYear: number; periodMonth: number; operatingExpenses?: unknown; netSales?: unknown; revenue?: unknown; netProfit?: unknown };
 export type ComparisonPeriod = { year: number; month: number };
