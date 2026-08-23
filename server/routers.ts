@@ -573,7 +573,7 @@ export const appRouter = router({
       if (!allowedIds.includes(input.branchId)) throw new TRPCError({ code: "FORBIDDEN", message: "لا تملك صلاحية هذا الفرع" });
       const existing = await db.select().from(branchFinancialSnapshots).where(eq(branchFinancialSnapshots.branchId, input.branchId));
       const match = existing.find(row => row.periodYear === input.year && row.periodMonth === input.month);
-      const netSales = input.revenue - input.salesReturns; const netCost = input.costOfGoods - input.costReturns; const netProfitMargin = netSales - netCost; const values = { branchId: input.branchId, periodYear: input.year, periodMonth: input.month, revenue: input.revenue.toFixed(2), salesReturns: input.salesReturns.toFixed(2), netSales: netSales.toFixed(2), costOfGoods: input.costOfGoods.toFixed(2), costReturns: input.costReturns.toFixed(2), netCost: netCost.toFixed(2), netProfitMargin: netProfitMargin.toFixed(2), operatingExpenses: input.operatingExpenses.toFixed(2), netProfit: (netProfitMargin - input.operatingExpenses).toFixed(2), notes: input.notes, source: "manual" as const, createdBy: ctx.user.id };
+      const netSales = input.revenue - input.salesReturns; const netCost = input.costOfGoods - input.costReturns; const netProfitMargin = netSales - netCost; const values = { branchId: input.branchId, periodYear: input.year, periodMonth: input.month, revenue: input.revenue.toFixed(2), salesReturns: input.salesReturns.toFixed(2), netSales: netSales.toFixed(2), costOfGoods: input.costOfGoods.toFixed(2), costReturns: input.costReturns.toFixed(2), netCost: netCost.toFixed(2), netProfitMargin: netProfitMargin.toFixed(2), operatingExpenses: input.operatingExpenses.toFixed(2), netProfit: (netProfitMargin - input.operatingExpenses).toFixed(2), approvalStatus: "draft" as const, approvedBy: null, approvedAt: null, notes: input.notes, source: "manual" as const, createdBy: ctx.user.id };
       if (match) {
         await db.update(branchFinancialSnapshots).set({ ...values, createdBy: match.createdBy ?? ctx.user.id }).where(eq(branchFinancialSnapshots.id, match.id));
         await recordAudit(db, { actorId: ctx.user.id, branchId: input.branchId, entityType: "financial_snapshot", entityId: match.id, action: "update", beforeData: match, afterData: values });
@@ -583,6 +583,19 @@ export const appRouter = router({
       const id = Number(inserted[0].insertId);
       await recordAudit(db, { actorId: ctx.user.id, branchId: input.branchId, entityType: "financial_snapshot", entityId: id, action: "create", afterData: values });
       return { id, updated: false };
+    }),
+    updateApproval: roleProcedure(["admin", "area_manager", "branch_manager"]).input(z.object({ id: z.number().int().positive(), status: z.enum(["draft", "submitted", "approved"]) })).mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      const [row] = await db.select().from(branchFinancialSnapshots).where(eq(branchFinancialSnapshots.id, input.id)).limit(1);
+      if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "اللقطة المالية غير موجودة" });
+      if (!(await canAccessBranch(ctx.user, row.branchId))) throw new TRPCError({ code: "FORBIDDEN", message: "لا تملك صلاحية هذا الفرع" });
+      if (input.status === "approved" && ctx.user.role !== "admin" && ctx.user.role !== "area_manager") throw new TRPCError({ code: "FORBIDDEN", message: "اعتماد البيانات المالية متاح للإدارة فقط" });
+      if (input.status === "submitted" && row.approvalStatus === "approved") throw new TRPCError({ code: "BAD_REQUEST", message: "لا يمكن إرجاع لقطة معتمدة للتقديم مباشرة" });
+      const patch = input.status === "approved" ? { approvalStatus: input.status, approvedBy: ctx.user.id, approvedAt: new Date() } : { approvalStatus: input.status, approvedBy: null, approvedAt: null };
+      await db.update(branchFinancialSnapshots).set(patch).where(eq(branchFinancialSnapshots.id, input.id));
+      await recordAudit(db, { actorId: ctx.user.id, branchId: row.branchId, entityType: "financial_snapshot", entityId: row.id, action: "approval_status", beforeData: { approvalStatus: row.approvalStatus, approvedBy: row.approvedBy, approvedAt: row.approvedAt }, afterData: patch });
+      return { success: true, status: input.status };
     }),
     generateDemoMonth: roleProcedure(["admin"]).input(z.object({ year: z.number().int().min(2000).max(2200), month: z.number().int().min(1).max(12), replaceExistingDemo: z.boolean().default(false) })).mutation(async ({ input, ctx }) => {
       const db = await getDb();
