@@ -211,7 +211,16 @@ export async function getOperationsOverview(user: Pick<User, "id" | "role" | "re
     if (row.periodYear === previousPeriod.year && row.periodMonth === previousPeriod.month) { item.previousRevenue = Number(row.revenue ?? 0); item.previousProfit = Number(row.netProfit ?? 0); }
   }
   const financialByBranch = Array.from(branchFinancialMap.values()).map((item) => ({ ...item, operatingExpenses: item.currentExpenses, currentPeriod: currentPeriodLabel, previousPeriod: previousPeriodLabel, revenueChangePercent: item.previousRevenue ? Math.round(((item.currentRevenue ?? 0) - item.previousRevenue) / item.previousRevenue * 1000) / 10 : null, profitChangePercent: item.previousProfit ? Math.round(((item.currentProfit ?? 0) - item.previousProfit) / item.previousProfit * 1000) / 10 : null }));
-  return { comparison, financialTrend, financialByBranch, financialPeriod: { year, month, current: currentPeriodLabel, previous: previousPeriodLabel }, visits: visitsRows, actions: actionRows, documents: documentRows, qualityCases: qualityRows, qualityAnalysis, operationalSummary, previousOperationalSummary, operationalComparison, dataQuality, qualitySummary, maintenanceTickets: maintenanceRows, requests: scopedRequests, tasks: scopedTasks, tasksAndRequests: [...scopedTasks, ...scopedRequests] };
+  const expectedFinancialCenters = visible.filter((branch) => branch.operationalType !== "representative");
+  const currentFinancialIds = new Set(visibleFinancialRows.filter((row) => row.periodYear === year && row.periodMonth === month).map((row) => row.branchId));
+  const financialCoverage = {
+    period: currentPeriodLabel,
+    expectedCenters: expectedFinancialCenters.length,
+    centersWithData: expectedFinancialCenters.filter((branch) => currentFinancialIds.has(branch.id)).length,
+    missingCenters: expectedFinancialCenters.filter((branch) => !currentFinancialIds.has(branch.id)).map((branch) => ({ id: branch.id, name: branch.name, operationalType: branch.operationalType ?? "branch" })),
+  };
+  const financialCoverageRate = financialCoverage.expectedCenters ? Math.round((financialCoverage.centersWithData / financialCoverage.expectedCenters) * 100) : null;
+  return { comparison, financialTrend, financialByBranch, financialPeriod: { year, month, current: currentPeriodLabel, previous: previousPeriodLabel }, financialCoverage: { ...financialCoverage, rate: financialCoverageRate }, visits: visitsRows, actions: actionRows, documents: documentRows, qualityCases: qualityRows, qualityAnalysis, operationalSummary, previousOperationalSummary, operationalComparison, dataQuality, qualitySummary, maintenanceTickets: maintenanceRows, requests: scopedRequests, tasks: scopedTasks, tasksAndRequests: [...scopedTasks, ...scopedRequests] };
 }
 
 export async function getInventoryMovementAnalysis(user: Pick<User, "id" | "role" | "regionId" | "branchId">, filters: { itemQuery?: string; costCenterCode?: string; branchId?: number; from?: Date; to?: Date }) {
