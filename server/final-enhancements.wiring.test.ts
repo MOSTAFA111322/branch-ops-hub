@@ -44,6 +44,16 @@ describe("final export and shortcut enhancements", () => {
     expect(router).toContain("لا تملك صلاحية تصدير سجل العمليات");
     expect(exportAudit).toContain("authorizeExport.mutateAsync");
     expect(exportAudit).toContain("ليس لديك صلاحية تصدير سجل العمليات");
+    expect(router).toContain("canExportAuditLogs");
+    expect(router).toContain("FORBIDDEN");
+  });
+
+  it("exports statistics separately and warns on a high failure rate", () => {
+    expect(exportAudit).toContain("exportStatistics");
+    expect(exportAudit).toContain("إحصاءات سجل عمليات التصدير");
+    expect(exportAudit).toContain("highFailureRate");
+    expect(exportAudit).toContain("تنبيه: ارتفاع معدل فشل التصدير");
+    expect(exportAudit).toContain("نسبة الفشل");
   });
 
   it("records started, successful, and failed export attempts", () => {
