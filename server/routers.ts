@@ -573,6 +573,7 @@ export const appRouter = router({
       if (!allowedIds.includes(input.branchId)) throw new TRPCError({ code: "FORBIDDEN", message: "لا تملك صلاحية هذا الفرع" });
       const existing = await db.select().from(branchFinancialSnapshots).where(eq(branchFinancialSnapshots.branchId, input.branchId));
       const match = existing.find(row => row.periodYear === input.year && row.periodMonth === input.month);
+      if (match?.approvalStatus === "approved") throw new TRPCError({ code: "BAD_REQUEST", message: "لا يمكن تعديل لقطة مالية معتمدة. أعدها إلى مسودة أولًا." });
       const netSales = input.revenue - input.salesReturns; const netCost = input.costOfGoods - input.costReturns; const netProfitMargin = netSales - netCost; const values = { branchId: input.branchId, periodYear: input.year, periodMonth: input.month, revenue: input.revenue.toFixed(2), salesReturns: input.salesReturns.toFixed(2), netSales: netSales.toFixed(2), costOfGoods: input.costOfGoods.toFixed(2), costReturns: input.costReturns.toFixed(2), netCost: netCost.toFixed(2), netProfitMargin: netProfitMargin.toFixed(2), operatingExpenses: input.operatingExpenses.toFixed(2), netProfit: (netProfitMargin - input.operatingExpenses).toFixed(2), approvalStatus: "draft" as const, approvedBy: null, approvedAt: null, notes: input.notes, source: "manual" as const, createdBy: ctx.user.id };
       if (match) {
         await db.update(branchFinancialSnapshots).set({ ...values, createdBy: match.createdBy ?? ctx.user.id }).where(eq(branchFinancialSnapshots.id, match.id));

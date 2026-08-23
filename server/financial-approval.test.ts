@@ -11,6 +11,8 @@ describe("financial snapshot approval wiring", () => {
     expect(routers).toContain("if (!(await canAccessBranch(ctx.user, row.branchId)))");
     expect(routers).toContain("اعتماد البيانات المالية متاح للإدارة فقط");
     expect(routers).toContain("action: \"approval_status\"");
+    expect(routers).toContain("if (match?.approvalStatus === \"approved\")");
+    expect(routers).toContain("لا يمكن تعديل لقطة مالية معتمدة");
   });
 
   it("exposes draft, submitted, and approved states in the Arabic financial table", () => {
