@@ -4,7 +4,7 @@ import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, roleProcedure, router } from "./_core/trpc";
 import { listHeartbeatJobs, updateHeartbeatJob } from "./_core/heartbeat";
-import { and, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, isNotNull } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { getBranchById, getBranchProfile, getDashboardSummary, getInventoryMovementAnalysis, getOperationsOverview, listBranches, getDb, listFavoritePeriodRanges, saveFavoritePeriodRange, deleteFavoritePeriodRange, renameFavoritePeriodRange, reorderFavoritePeriodRanges, updateFavoritePeriodSettings } from "./db";
 import { retryCommandUsageDigest, retryScheduledReportDelivery } from "./scheduled";
@@ -285,6 +285,14 @@ export const appRouter = router({
       const archivedAt = new Date();
       await db.update(notifications).set({ archivedAt, archivedById: ctx.user.id }).where(and(inArray(notifications.id, input.ids), eq(notifications.recipientId, ctx.user.id)));
       await recordAudit(db, { actorId: ctx.user.id, entityType: "notification", action: "notification_bulk_archived", afterData: { ids: input.ids, count: rows.length, branchIds: Array.from(new Set(rows.map((row) => row.branchId).filter((id): id is number => id != null))) } });
+      return { success: true, count: rows.length };
+    }),
+    restoreBulk: protectedProcedure.input(z.object({ ids: z.array(z.number().int().positive()).min(1).max(100) })).mutation(async ({ ctx, input }) => {
+      const db = await getDb(); if (!db) throw new Error("Database unavailable");
+      const rows = await db.select().from(notifications).where(and(inArray(notifications.id, input.ids), eq(notifications.recipientId, ctx.user.id), isNotNull(notifications.archivedAt)));
+      if (rows.length !== input.ids.length) throw new TRPCError({ code: "FORBIDDEN", message: "تتضمن القائمة تنبيهات مؤرشفة غير متاحة لحسابك." });
+      await db.update(notifications).set({ archivedAt: null, archivedById: null }).where(and(inArray(notifications.id, input.ids), eq(notifications.recipientId, ctx.user.id)));
+      await recordAudit(db, { actorId: ctx.user.id, entityType: "notification", action: "notification_bulk_unarchived", afterData: { ids: input.ids, count: rows.length, branchIds: Array.from(new Set(rows.map((row) => row.branchId).filter((id): id is number => id != null))) } });
       return { success: true, count: rows.length };
     }),
     unreadCount: protectedProcedure.query(async ({ ctx }) => { const db = await getDb(); if (!db) return 0; const rows = await db.select({ id: notifications.id }).from(notifications).where(and(eq(notifications.recipientId, ctx.user.id), isNull(notifications.readAt), isNull(notifications.archivedAt))); return rows.length; }),

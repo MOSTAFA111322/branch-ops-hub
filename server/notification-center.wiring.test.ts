@@ -8,6 +8,7 @@ describe("notification center filtering and archival", () => {
   const scheduled = readFileSync(resolve(root, "server/scheduled.ts"), "utf8");
   const schema = readFileSync(resolve(root, "drizzle/schema.ts"), "utf8");
   const alertHistory = readFileSync(resolve(root, "client/src/components/AlertHistoryView.tsx"), "utf8");
+  const home = readFileSync(resolve(root, "client/src/pages/Home.tsx"), "utf8");
 
   it("stores structured branch, archive, and retention metadata", () => {
     expect(schema).toContain('branchId: int("branchId")');
@@ -32,6 +33,8 @@ describe("notification center filtering and archival", () => {
     expect(router).toContain('entityType: "notification"');
     expect(router).toContain("archivedById");
     expect(router).toContain("archiveBulk: protectedProcedure");
+    expect(router).toContain("restoreBulk: protectedProcedure");
+    expect(router).toContain("notification_bulk_unarchived");
     expect(router).toContain("notification_bulk_archived");
     expect(router).toContain("تتضمن القائمة تنبيهات غير متاحة لحسابك");
   });
@@ -55,10 +58,19 @@ describe("notification center filtering and archival", () => {
     expect(alertHistory).toContain("أرشفة التنبيه");
     expect(alertHistory).toContain("إلغاء الأرشفة");
     expect(alertHistory).toContain("archiveBulk.useMutation");
+    expect(alertHistory).toContain("restoreBulk.useMutation");
+    expect(alertHistory).toContain("استرجاع المحدد");
     expect(alertHistory).toContain("سيتم أرشفة");
+    expect(alertHistory).toContain("معاينة تصدير مركز التنبيهات");
+    expect(alertHistory).toContain("setShowExportPreview(true)");
     expect(alertHistory).toContain("const exportExcel");
     expect(alertHistory).toContain("const exportPdf");
     expect(alertHistory).toContain("XLSX.writeFile");
     expect(alertHistory).toContain("notification-center-filtered.pdf");
+  });
+
+  it("keeps the data-quality signal based on real stored data", () => {
+    expect(home).toContain("جودة البيانات والالتزام");
+    expect(home).toContain("المؤشرات محسوبة من ملف الفرع وسجل الزيارات والبيانات التشغيلية المحفوظة فعليًا");
   });
 });
