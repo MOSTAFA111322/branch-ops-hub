@@ -1,0 +1,1 @@
+ALTER TABLE `dashboardPreferences` ADD `exportFailureThreshold` int DEFAULT 20 NOT NULL;

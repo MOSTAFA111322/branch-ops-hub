@@ -46,6 +46,7 @@ describe("final export and shortcut enhancements", () => {
     expect(exportAudit).toContain("ليس لديك صلاحية تصدير سجل العمليات");
     expect(router).toContain("canExportAuditLogs");
     expect(router).toContain("FORBIDDEN");
+    expect(router).toContain("roleProcedure([\"admin\", \"area_manager\"])");
   });
 
   it("exports statistics separately and warns on a high failure rate", () => {
@@ -54,6 +55,17 @@ describe("final export and shortcut enhancements", () => {
     expect(exportAudit).toContain("highFailureRate");
     expect(exportAudit).toContain("تنبيه: ارتفاع معدل فشل التصدير");
     expect(exportAudit).toContain("نسبة الفشل");
+    expect(exportAudit).toContain("getExportFailureThreshold");
+    expect(exportAudit).toContain("saveExportFailureThreshold");
+    expect(exportAudit).toContain("حفظ الحد");
+  });
+
+  it("notifies administrators when the configured failure threshold is exceeded", () => {
+    expect(schema).toContain('exportFailureThreshold: int("exportFailureThreshold")');
+    expect(router).toContain("notifyOwner");
+    expect(router).toContain("export_failure_rate_high");
+    expect(router).toContain("24 * 60 * 60 * 1000");
+    expect(router).toContain("export_failure_alert");
   });
 
   it("records started, successful, and failed export attempts", () => {
