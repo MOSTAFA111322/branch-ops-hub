@@ -9,10 +9,11 @@ describe("notification center filtering and archival", () => {
   const schema = readFileSync(resolve(root, "drizzle/schema.ts"), "utf8");
   const alertHistory = readFileSync(resolve(root, "client/src/components/AlertHistoryView.tsx"), "utf8");
 
-  it("stores structured branch and archive metadata on notifications", () => {
+  it("stores structured branch, archive, and retention metadata", () => {
     expect(schema).toContain('branchId: int("branchId")');
     expect(schema).toContain('archivedAt: timestamp("archivedAt")');
     expect(schema).toContain('archivedById: int("archivedById")');
+    expect(schema).toContain('notificationRetentionDays: int("notificationRetentionDays")');
   });
 
   it("exposes protected type, branch, and archived filters", () => {
@@ -30,18 +31,34 @@ describe("notification center filtering and archival", () => {
     expect(router).toContain("notification_unarchived");
     expect(router).toContain('entityType: "notification"');
     expect(router).toContain("archivedById");
+    expect(router).toContain("archiveBulk: protectedProcedure");
+    expect(router).toContain("notification_bulk_archived");
+    expect(router).toContain("تتضمن القائمة تنبيهات غير متاحة لحسابك");
   });
 
   it("writes branch context for scheduled inventory alerts", () => {
     expect(scheduled).toContain('entityType: "inventory", branchId: row.branchId');
   });
 
-  it("renders Arabic type and branch filters with archive controls", () => {
+  it("exposes the retention policy with role protection", () => {
+    expect(router).toContain("getRetentionPolicy: protectedProcedure");
+    expect(router).toContain('saveRetentionPolicy: roleProcedure(["admin", "area_manager"])');
+    expect(router).toContain("notification_retention_updated");
+    expect(router).toContain("retentionDays: z.number().int().min(0).max(3650)");
+  });
+
+  it("renders Arabic type and branch filters with archive controls and exports", () => {
     expect(alertHistory).toContain('aria-label="نوع التنبيه"');
     expect(alertHistory).toContain('aria-label="فرع التنبيه"');
     expect(alertHistory).toContain("عرض المؤرشفة");
     expect(alertHistory).toContain("setArchived.useMutation");
     expect(alertHistory).toContain("أرشفة التنبيه");
     expect(alertHistory).toContain("إلغاء الأرشفة");
+    expect(alertHistory).toContain("archiveBulk.useMutation");
+    expect(alertHistory).toContain("سيتم أرشفة");
+    expect(alertHistory).toContain("const exportExcel");
+    expect(alertHistory).toContain("const exportPdf");
+    expect(alertHistory).toContain("XLSX.writeFile");
+    expect(alertHistory).toContain("notification-center-filtered.pdf");
   });
 });

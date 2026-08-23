@@ -44,6 +44,7 @@ export const dashboardPreferences = mysqlTable("dashboardPreferences", {
   userId: int("userId").notNull().unique(),
   visibleWidgets: text("visibleWidgets").notNull(),
   exportFailureThreshold: int("exportFailureThreshold").default(20).notNull(),
+  notificationRetentionDays: int("notificationRetentionDays").default(0).notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 

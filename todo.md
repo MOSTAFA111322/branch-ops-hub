@@ -745,3 +745,11 @@
 - [x] Notification Center: record notification archive actions in auditLogs
 - [x] Notification Center: add tests for filters, archive mutation, and audit logging
 - [x] Final validation: run TypeScript check, full Vitest suite, and RTL visual review of notification filters and archive UI
+
+## مقترحات مركز التنبيهات الجديدة
+
+- [x] إضافة أرشفة جماعية للتنبيهات المحددة مع نافذة تأكيد وتسجيل تدقيق موحد.
+- [x] إضافة سياسة احتفاظ اختيارية للتنبيهات المؤرشفة مع إعداد إداري آمن دون حذف تلقائي افتراضي.
+- [x] إضافة تصدير نتائج مركز التنبيهات المفلترة إلى Excel وPDF مع حالة الأرشفة والفرع والنوع.
+- [x] إضافة اختبارات Vitest للأرشفة الجماعية وسياسة الاحتفاظ والتصدير والصلاحيات.
+- [x] إجراء فحص TypeScript ومراجعة RTL مكتبية ومحمولة ثم حفظ إصدار جديد.

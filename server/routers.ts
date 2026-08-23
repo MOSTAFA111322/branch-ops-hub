@@ -257,9 +257,35 @@ export const appRouter = router({
       const visibleBranches = ctx.user.role === "admin" ? null : await listBranches(ctx.user);
       const visibleBranchIds = visibleBranches ? new Set(visibleBranches.map((branch) => branch.id)) : null;
       if (input?.branchId && visibleBranchIds && !visibleBranchIds.has(input.branchId)) throw new TRPCError({ code: "FORBIDDEN", message: "لا تملك صلاحية عرض تنبيهات هذا الفرع." });
+      const [preference] = await db.select({ notificationRetentionDays: dashboardPreferences.notificationRetentionDays }).from(dashboardPreferences).where(eq(dashboardPreferences.userId, ctx.user.id)).limit(1);
+      const retentionDays = preference?.notificationRetentionDays ?? 0;
+      const retentionCutoff = retentionDays > 0 ? Date.now() - retentionDays * 86400000 : 0;
       const filters = [eq(notifications.recipientId, ctx.user.id), input?.kind ? eq(notifications.kind, input.kind) : undefined, input?.branchId ? eq(notifications.branchId, input.branchId) : undefined, input?.includeArchived ? undefined : isNull(notifications.archivedAt)].filter(Boolean) as any[];
       const rows = await db.select().from(notifications).where(and(...filters)).orderBy(desc(notifications.createdAt)).limit(200);
-      return visibleBranchIds ? rows.filter((row) => !row.branchId || visibleBranchIds.has(row.branchId)) : rows;
+      const retentionVisible = rows.filter((row) => !row.archivedAt || !retentionCutoff || new Date(row.archivedAt).getTime() >= retentionCutoff);
+      return visibleBranchIds ? retentionVisible.filter((row) => !row.branchId || visibleBranchIds.has(row.branchId)) : retentionVisible;
+    }),
+    getRetentionPolicy: protectedProcedure.query(async ({ ctx }) => {
+      const db = await getDb(); if (!db) return { retentionDays: 0 };
+      const [row] = await db.select({ retentionDays: dashboardPreferences.notificationRetentionDays }).from(dashboardPreferences).where(eq(dashboardPreferences.userId, ctx.user.id)).limit(1);
+      return { retentionDays: row?.retentionDays ?? 0 };
+    }),
+    saveRetentionPolicy: roleProcedure(["admin", "area_manager"]).input(z.object({ retentionDays: z.number().int().min(0).max(3650) })).mutation(async ({ ctx, input }) => {
+      const db = await getDb(); if (!db) throw new Error("Database unavailable");
+      const [current] = await db.select({ id: dashboardPreferences.id }).from(dashboardPreferences).where(eq(dashboardPreferences.userId, ctx.user.id)).limit(1);
+      if (current) await db.update(dashboardPreferences).set({ notificationRetentionDays: input.retentionDays }).where(eq(dashboardPreferences.userId, ctx.user.id));
+      else await db.insert(dashboardPreferences).values({ userId: ctx.user.id, visibleWidgets: JSON.stringify(["overview"]), notificationRetentionDays: input.retentionDays });
+      await recordAudit(db, { actorId: ctx.user.id, entityType: "notification_policy", action: "notification_retention_updated", afterData: input });
+      return { success: true, retentionDays: input.retentionDays };
+    }),
+    archiveBulk: protectedProcedure.input(z.object({ ids: z.array(z.number().int().positive()).min(1).max(100) })).mutation(async ({ ctx, input }) => {
+      const db = await getDb(); if (!db) throw new Error("Database unavailable");
+      const rows = await db.select().from(notifications).where(and(inArray(notifications.id, input.ids), eq(notifications.recipientId, ctx.user.id)));
+      if (rows.length !== input.ids.length) throw new TRPCError({ code: "FORBIDDEN", message: "تتضمن القائمة تنبيهات غير متاحة لحسابك." });
+      const archivedAt = new Date();
+      await db.update(notifications).set({ archivedAt, archivedById: ctx.user.id }).where(and(inArray(notifications.id, input.ids), eq(notifications.recipientId, ctx.user.id)));
+      await recordAudit(db, { actorId: ctx.user.id, entityType: "notification", action: "notification_bulk_archived", afterData: { ids: input.ids, count: rows.length, branchIds: Array.from(new Set(rows.map((row) => row.branchId).filter((id): id is number => id != null))) } });
+      return { success: true, count: rows.length };
     }),
     unreadCount: protectedProcedure.query(async ({ ctx }) => { const db = await getDb(); if (!db) return 0; const rows = await db.select({ id: notifications.id }).from(notifications).where(and(eq(notifications.recipientId, ctx.user.id), isNull(notifications.readAt), isNull(notifications.archivedAt))); return rows.length; }),
     markRead: protectedProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ ctx, input }) => { const db = await getDb(); if (!db) throw new Error("Database unavailable"); await db.update(notifications).set({ readAt: new Date() }).where(and(eq(notifications.id, input.id), eq(notifications.recipientId, ctx.user.id))); return { success: true }; }),

@@ -1,0 +1,1 @@
+ALTER TABLE `dashboardPreferences` ADD `notificationRetentionDays` int DEFAULT 0 NOT NULL;
