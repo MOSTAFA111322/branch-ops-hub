@@ -9,6 +9,8 @@ describe("final export and shortcut enhancements", () => {
   const inventory = readFileSync(resolve(root, "client/src/components/InventoryAnalysisView.tsx"), "utf8");
   const schema = readFileSync(resolve(root, "drizzle/schema.ts"), "utf8");
   const exportAudit = readFileSync(resolve(root, "client/src/components/ExportAuditView.tsx"), "utf8");
+  const alertHistory = readFileSync(resolve(root, "client/src/components/AlertHistoryView.tsx"), "utf8");
+  const users = readFileSync(resolve(root, "client/src/components/UserAccountManager.tsx"), "utf8");
 
   it("stores pin and keyboard shortcut settings for favorite periods", () => {
     expect(schema).toContain('isPinned: boolean("isPinned")');
@@ -58,6 +60,25 @@ describe("final export and shortcut enhancements", () => {
     expect(exportAudit).toContain("getExportFailureThreshold");
     expect(exportAudit).toContain("saveExportFailureThreshold");
     expect(exportAudit).toContain("حفظ الحد");
+  });
+
+  it("supports official 10% and 20% failure-threshold presets", () => {
+    expect(exportAudit).toContain('setThresholdDraft(10)');
+    expect(exportAudit).toContain('setThresholdDraft(20)');
+    expect(schema).toContain('exportFailureThreshold: int("exportFailureThreshold")');
+  });
+
+  it("provides unread notification filtering and bulk read confirmation", () => {
+    expect(alertHistory).toContain("غير مقروء");
+    expect(alertHistory).toContain("markAllRead");
+    expect(alertHistory).toContain("تحديد الكل كمقروء");
+    expect(alertHistory).toContain("readAt");
+  });
+
+  it("exposes the allowed and denied export-audit permission paths in the UI", () => {
+    expect(users).toContain("canExportAuditLogs");
+    expect(exportAudit).toContain("ليس لديك صلاحية تصدير سجل العمليات");
+    expect(exportAudit).toContain("disabled={!rows.length || !canExport.data");
   });
 
   it("notifies administrators when the configured failure threshold is exceeded", () => {
