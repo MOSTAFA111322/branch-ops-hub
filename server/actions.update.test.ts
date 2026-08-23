@@ -10,6 +10,9 @@ const successDb = {
       }),
     }),
   }),
+  insert: () => ({
+    values: async () => undefined,
+  }),
   update: () => ({
     set: (payload: Record<string, unknown>) => ({
       where: async () => {
@@ -51,5 +54,20 @@ describe("actions.update owner and closure evidence", () => {
     const caller = appRouter.createCaller(adminContext);
     await expect(caller.actions.update({ id: 1, ownerId: 0 })).rejects.toMatchObject({ code: "BAD_REQUEST" });
     await expect(caller.actions.update({ id: 1, closureEvidenceUrl: "not-a-url" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+});
+
+const branchManagerContext: TrpcContext = {
+  user: { id: 2, openId: "actions-update-manager", name: "مدير فرع", email: "manager@example.com", role: "branch_manager", branchId: 1 },
+  req: {} as TrpcContext["req"],
+  res: {} as TrpcContext["res"],
+};
+
+describe("actions branch authorization", () => {
+  it("rejects creating an action for a branch outside the user's scope", async () => {
+    await expect(appRouter.createCaller(branchManagerContext).actions.create({
+      branchId: 2,
+      title: "محاولة خارج النطاق",
+    })).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 });

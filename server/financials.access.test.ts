@@ -35,6 +35,7 @@ describe("monthly financial snapshots", () => {
   it("enforces read scope, rejects unauthorized mutations, and validates periods", async () => {
     const viewerCaller = appRouter.createCaller(viewer);
     expect(await viewerCaller.financials.list({ year: 2026, month: 8 })).toEqual(expect.arrayContaining([expect.objectContaining({ branchId: 1, periodMonth: 8 })]));
+    await expect(viewerCaller.financials.list({ branchId: 999, year: 2026, month: 8 })).rejects.toMatchObject({ code: "FORBIDDEN" });
     await expect(viewerCaller.financials.upsert({ branchId: 1, year: 2026, month: 8, revenue: 1, costOfGoods: 0, operatingExpenses: 0 })).rejects.toMatchObject({ code: "FORBIDDEN" });
     await expect(viewerCaller.financials.remove({ id: 10 })).rejects.toMatchObject({ code: "FORBIDDEN" });
     await expect(appRouter.createCaller(admin).financials.upsert({ branchId: 1, year: 2026, month: 13, revenue: 1, costOfGoods: 0, operatingExpenses: 0 })).rejects.toMatchObject({ code: "BAD_REQUEST" });

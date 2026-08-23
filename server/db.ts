@@ -58,6 +58,12 @@ export async function listBranches(user?: Pick<User, "id" | "role" | "regionId" 
   return rows.filter((branch) => user.branchId ? branch.id === user.branchId : user.regionId ? branch.regionId === user.regionId : false);
 }
 
+export async function canAccessBranch(user: Pick<User, "id" | "role" | "regionId" | "branchId">, branchId: number) {
+  if (user.role === "admin") return true;
+  const visible = await listBranches(user);
+  return visible.some((branch) => branch.id === branchId);
+}
+
 async function getBranchRecordById(id: number) {
   const db = await getDb();
   if (!db) return undefined;
