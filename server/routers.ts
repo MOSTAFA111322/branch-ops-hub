@@ -252,10 +252,27 @@ export const appRouter = router({
     }),
   }),
   notifications: router({
-    list: protectedProcedure.query(async ({ ctx }) => { const db = await getDb(); if (!db) return []; return db.select().from(notifications).where(eq(notifications.recipientId, ctx.user.id)).orderBy(notifications.createdAt).limit(100); }),
-    unreadCount: protectedProcedure.query(async ({ ctx }) => { const db = await getDb(); if (!db) return 0; const rows = await db.select({ id: notifications.id }).from(notifications).where(and(eq(notifications.recipientId, ctx.user.id), isNull(notifications.readAt))); return rows.length; }),
+    list: protectedProcedure.input(z.object({ kind: z.string().trim().min(1).max(80).optional(), branchId: z.number().int().positive().optional(), includeArchived: z.boolean().default(false) }).optional()).query(async ({ ctx, input }) => {
+      const db = await getDb(); if (!db) return [];
+      const visibleBranches = ctx.user.role === "admin" ? null : await listBranches(ctx.user);
+      const visibleBranchIds = visibleBranches ? new Set(visibleBranches.map((branch) => branch.id)) : null;
+      if (input?.branchId && visibleBranchIds && !visibleBranchIds.has(input.branchId)) throw new TRPCError({ code: "FORBIDDEN", message: "لا تملك صلاحية عرض تنبيهات هذا الفرع." });
+      const filters = [eq(notifications.recipientId, ctx.user.id), input?.kind ? eq(notifications.kind, input.kind) : undefined, input?.branchId ? eq(notifications.branchId, input.branchId) : undefined, input?.includeArchived ? undefined : isNull(notifications.archivedAt)].filter(Boolean) as any[];
+      const rows = await db.select().from(notifications).where(and(...filters)).orderBy(desc(notifications.createdAt)).limit(200);
+      return visibleBranchIds ? rows.filter((row) => !row.branchId || visibleBranchIds.has(row.branchId)) : rows;
+    }),
+    unreadCount: protectedProcedure.query(async ({ ctx }) => { const db = await getDb(); if (!db) return 0; const rows = await db.select({ id: notifications.id }).from(notifications).where(and(eq(notifications.recipientId, ctx.user.id), isNull(notifications.readAt), isNull(notifications.archivedAt))); return rows.length; }),
     markRead: protectedProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ ctx, input }) => { const db = await getDb(); if (!db) throw new Error("Database unavailable"); await db.update(notifications).set({ readAt: new Date() }).where(and(eq(notifications.id, input.id), eq(notifications.recipientId, ctx.user.id))); return { success: true }; }),
     markReadBulk: protectedProcedure.input(z.object({ ids: z.array(z.number().int().positive()).min(1).max(100) })).mutation(async ({ ctx, input }) => { const db = await getDb(); if (!db) throw new Error("Database unavailable"); await db.update(notifications).set({ readAt: new Date() }).where(and(inArray(notifications.id, input.ids), eq(notifications.recipientId, ctx.user.id))); return { success: true, count: input.ids.length }; }),
+    setArchived: protectedProcedure.input(z.object({ id: z.number().int().positive(), archived: z.boolean() })).mutation(async ({ ctx, input }) => {
+      const db = await getDb(); if (!db) throw new Error("Database unavailable");
+      const [notification] = await db.select().from(notifications).where(and(eq(notifications.id, input.id), eq(notifications.recipientId, ctx.user.id))).limit(1);
+      if (!notification) throw new TRPCError({ code: "NOT_FOUND", message: "التنبيه غير موجود أو لا تملك الوصول إليه." });
+      const archivedAt = input.archived ? new Date() : null;
+      await db.update(notifications).set({ archivedAt, archivedById: input.archived ? ctx.user.id : null }).where(eq(notifications.id, input.id));
+      await recordAudit(db, { actorId: ctx.user.id, branchId: notification.branchId ?? undefined, entityType: "notification", entityId: notification.id, action: input.archived ? "notification_archived" : "notification_unarchived", beforeData: { archivedAt: notification.archivedAt, archivedById: notification.archivedById }, afterData: { archivedAt, archivedById: input.archived ? ctx.user.id : null, kind: notification.kind, title: notification.title } });
+      return { success: true, archived: input.archived };
+    }),
   }),
   reportApprovals: router({
     list: roleProcedure(["admin", "area_manager", "quality"]).input(z.object({ periodYear: z.number().int().min(2020).max(2100), periodMonth: z.number().int().min(1).max(12) })).query(async ({ input }) => { const db = await getDb(); if (!db) return []; return db.select().from(reportApprovals).where(eq(reportApprovals.periodYear, input.periodYear)); }),

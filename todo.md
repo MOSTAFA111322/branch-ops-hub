@@ -739,3 +739,9 @@
 
 - [x] إلغاء مسار إرسال البريد الإلكتروني بناءً على طلب المستخدم؛ لا توجد مراجع برمجية لمتغيرات RESEND_API_KEY أو EXPORT_ALERT_ADMIN_EMAIL، وتبقى التنبيهات داخل النظام فقط.
 - [x] التحقق النهائي بعد الإلغاء: TypeScript ناجح و121 اختبارًا ناجحًا.
+
+- [x] Notification Center: add structured notification type and branch filters with Arabic RTL labels
+- [x] Notification Center: add archived state, archive/unarchive actions, and hide archived notifications by default
+- [x] Notification Center: record notification archive actions in auditLogs
+- [x] Notification Center: add tests for filters, archive mutation, and audit logging
+- [x] Final validation: run TypeScript check, full Vitest suite, and RTL visual review of notification filters and archive UI

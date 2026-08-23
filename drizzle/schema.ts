@@ -356,7 +356,10 @@ export const notifications = mysqlTable("notifications", {
   content: text("content").notNull(),
   entityType: varchar("entityType", { length: 80 }),
   entityId: int("entityId"),
+  branchId: int("branchId"),
   readAt: timestamp("readAt"),
+  archivedAt: timestamp("archivedAt"),
+  archivedById: int("archivedById"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 

@@ -35,7 +35,7 @@ export async function inventoryAlertsHandler(req: Request, res: Response) {
       const stale = row.sales <= 0;
       const title = stale ? `صنف راكد: ${row.itemName}` : `مخزون منخفض: ${row.itemName}`;
       const content = `${row.branchId ? branchNames.get(row.branchId) ?? "فرع غير محدد" : "مركز غير محدد"} · المتاح ${row.available.toLocaleString("ar-SA")}${stale ? " · دون مبيعات" : ""}`;
-      if (recipients.length) await db.insert(notifications).values(recipients.map((recipient) => ({ recipientId: recipient.id, kind: stale ? "inventory_stale" : "inventory_low", title, content, entityType: "inventory" })));
+      if (recipients.length) await db.insert(notifications).values(recipients.map((recipient) => ({ recipientId: recipient.id, kind: stale ? "inventory_stale" : "inventory_low", title, content, entityType: "inventory", branchId: row.branchId })));
       await db.insert(tasks).values({ branchId: row.branchId, assigneeId: null, title: `متابعة ${title}`, priority: stale ? "medium" : "high", status: "todo" });
     }
     await db.insert(auditLogs).values({ actorId: user.id > 0 ? user.id : null, action: marker, entityType: "inventory_alert_refresh", afterData: JSON.stringify({ marker, alerts: alerts.length, taskUid: user.taskUid }) });
