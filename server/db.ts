@@ -300,7 +300,24 @@ export async function getDashboardSummary(user: Pick<User, "id" | "role" | "regi
 export async function listFavoritePeriodRanges(userId: number) {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(favoritePeriodRanges).where(eq(favoritePeriodRanges.userId, userId)).orderBy(desc(favoritePeriodRanges.updatedAt));
+  return db.select().from(favoritePeriodRanges).where(eq(favoritePeriodRanges.userId, userId)).orderBy(favoritePeriodRanges.sortOrder, desc(favoritePeriodRanges.updatedAt));
+}
+
+export async function renameFavoritePeriodRange(input: { userId: number; id: number; name: string }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  await db.update(favoritePeriodRanges).set({ name: input.name }).where(and(eq(favoritePeriodRanges.id, input.id), eq(favoritePeriodRanges.userId, input.userId)));
+  return { success: true };
+}
+
+export async function reorderFavoritePeriodRanges(userId: number, orderedIds: number[]) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const owned = await db.select({ id: favoritePeriodRanges.id }).from(favoritePeriodRanges).where(eq(favoritePeriodRanges.userId, userId));
+  const ownedIds = new Set(owned.map((row) => row.id));
+  if (orderedIds.some((id) => !ownedIds.has(id)) || new Set(orderedIds).size !== orderedIds.length || orderedIds.length !== owned.length) throw new Error("ترتيب النطاقات غير صالح.");
+  for (let index = 0; index < orderedIds.length; index += 1) { const id = orderedIds[index]; await db.update(favoritePeriodRanges).set({ sortOrder: index }).where(and(eq(favoritePeriodRanges.id, id), eq(favoritePeriodRanges.userId, userId))); }
+  return { success: true };
 }
 
 export async function saveFavoritePeriodRange(input: { userId: number; name: string; fromDate: string; toDate: string }) {
@@ -311,7 +328,8 @@ export async function saveFavoritePeriodRange(input: { userId: number; name: str
     await db.update(favoritePeriodRanges).set({ fromDate: input.fromDate, toDate: input.toDate }).where(eq(favoritePeriodRanges.id, existing.id));
     return { id: existing.id, updated: true };
   }
-  const inserted = await db.insert(favoritePeriodRanges).values(input);
+  const [last] = await db.select({ sortOrder: favoritePeriodRanges.sortOrder }).from(favoritePeriodRanges).where(eq(favoritePeriodRanges.userId, input.userId)).orderBy(desc(favoritePeriodRanges.sortOrder)).limit(1);
+  const inserted = await db.insert(favoritePeriodRanges).values({ ...input, sortOrder: Number(last?.sortOrder ?? -1) + 1 });
   return { id: Number(inserted[0].insertId), updated: false };
 }
 

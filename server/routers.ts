@@ -6,7 +6,7 @@ import { protectedProcedure, publicProcedure, roleProcedure, router } from "./_c
 import { listHeartbeatJobs, updateHeartbeatJob } from "./_core/heartbeat";
 import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
-import { getBranchById, getBranchProfile, getDashboardSummary, getInventoryMovementAnalysis, getOperationsOverview, listBranches, getDb, listFavoritePeriodRanges, saveFavoritePeriodRange, deleteFavoritePeriodRange } from "./db";
+import { getBranchById, getBranchProfile, getDashboardSummary, getInventoryMovementAnalysis, getOperationsOverview, listBranches, getDb, listFavoritePeriodRanges, saveFavoritePeriodRange, deleteFavoritePeriodRange, renameFavoritePeriodRange, reorderFavoritePeriodRanges } from "./db";
 import { retryCommandUsageDigest, retryScheduledReportDelivery } from "./scheduled";
 import { branches, regions, branchAssets, branchFinancialSnapshots, favoritePeriodRanges, checklistItems, checklistTemplates, correctiveActions, dashboardPreferences, documentVersions, documents, internalRequests, maintenanceTickets, qualityCases, tasks, users, userBranchPermissions, reportShareLogs, visitChecklistResults, visits, auditLogs, notifications, reportApprovals, scheduledReportRecipients, scheduledReportDeliveries, costCenterMappings, inventoryMovementSnapshots } from "../drizzle/schema";
 import { aggregateFinancialComparison } from "../shared/financials";
@@ -42,6 +42,16 @@ export const appRouter = router({
         const result = await saveFavoritePeriodRange({ userId: ctx.user.id, ...input });
         const db = await getDb();
         if (db) await recordAudit(db, { actorId: ctx.user.id, entityType: "dashboard_period", action: result.updated ? "favorite_period_updated" : "favorite_period_created", afterData: input });
+        return result;
+      }),
+      rename: protectedProcedure.input(z.object({ id: z.number().int().positive(), name: z.string().trim().min(2).max(120) })).mutation(async ({ ctx, input }) => {
+        const result = await renameFavoritePeriodRange({ userId: ctx.user.id, ...input });
+        const db = await getDb(); if (db) await recordAudit(db, { actorId: ctx.user.id, entityType: "dashboard_period", entityId: input.id, action: "favorite_period_renamed", afterData: input });
+        return result;
+      }),
+      reorder: protectedProcedure.input(z.object({ orderedIds: z.array(z.number().int().positive()).min(1) })).mutation(async ({ ctx, input }) => {
+        const result = await reorderFavoritePeriodRanges(ctx.user.id, input.orderedIds);
+        const db = await getDb(); if (db) await recordAudit(db, { actorId: ctx.user.id, entityType: "dashboard_period", action: "favorite_period_reordered", afterData: input });
         return result;
       }),
       remove: protectedProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
