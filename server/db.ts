@@ -339,3 +339,21 @@ export async function deleteFavoritePeriodRange(userId: number, id: number) {
   await db.delete(favoritePeriodRanges).where(and(eq(favoritePeriodRanges.id, id), eq(favoritePeriodRanges.userId, userId)));
   return { success: true };
 }
+
+export async function updateFavoritePeriodSettings(input: { userId: number; id: number; isPinned?: boolean; shortcutKey?: string | null }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const [favorite] = await db.select().from(favoritePeriodRanges).where(and(eq(favoritePeriodRanges.id, input.id), eq(favoritePeriodRanges.userId, input.userId))).limit(1);
+  if (!favorite) throw new Error("النطاق المفضل غير موجود.");
+  if (input.shortcutKey) {
+    await db.update(favoritePeriodRanges).set({ shortcutKey: null }).where(and(eq(favoritePeriodRanges.userId, input.userId), eq(favoritePeriodRanges.shortcutKey, input.shortcutKey)));
+  }
+  if (input.isPinned === true) {
+    await db.update(favoritePeriodRanges).set({ isPinned: false }).where(eq(favoritePeriodRanges.userId, input.userId));
+  }
+  await db.update(favoritePeriodRanges).set({
+    ...(input.isPinned === undefined ? {} : { isPinned: input.isPinned }),
+    ...(input.shortcutKey === undefined ? {} : { shortcutKey: input.shortcutKey }),
+  }).where(and(eq(favoritePeriodRanges.id, input.id), eq(favoritePeriodRanges.userId, input.userId)));
+  return { success: true };
+}

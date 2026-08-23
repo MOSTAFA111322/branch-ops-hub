@@ -52,6 +52,8 @@ export const favoritePeriodRanges = mysqlTable("favoritePeriodRanges", {
   fromDate: varchar("fromDate", { length: 10 }).notNull(),
   toDate: varchar("toDate", { length: 10 }).notNull(),
   sortOrder: int("sortOrder").default(0).notNull(),
+  isPinned: boolean("isPinned").default(false).notNull(),
+  shortcutKey: varchar("shortcutKey", { length: 24 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 }, (table) => ({ userFavoriteNameUnique: uniqueIndex("favorite_period_user_name_unique").on(table.userId, table.name) }));

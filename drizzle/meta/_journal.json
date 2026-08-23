@@ -162,6 +162,13 @@
       "when": 1787452667212,
       "tag": "0022_broken_silver_samurai",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "5",
+      "when": 1787456619345,
+      "tag": "0023_fast_magus",
+      "breakpoints": true
     }
   ]
 }

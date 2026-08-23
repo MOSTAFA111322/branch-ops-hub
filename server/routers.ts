@@ -6,7 +6,7 @@ import { protectedProcedure, publicProcedure, roleProcedure, router } from "./_c
 import { listHeartbeatJobs, updateHeartbeatJob } from "./_core/heartbeat";
 import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
-import { getBranchById, getBranchProfile, getDashboardSummary, getInventoryMovementAnalysis, getOperationsOverview, listBranches, getDb, listFavoritePeriodRanges, saveFavoritePeriodRange, deleteFavoritePeriodRange, renameFavoritePeriodRange, reorderFavoritePeriodRanges } from "./db";
+import { getBranchById, getBranchProfile, getDashboardSummary, getInventoryMovementAnalysis, getOperationsOverview, listBranches, getDb, listFavoritePeriodRanges, saveFavoritePeriodRange, deleteFavoritePeriodRange, renameFavoritePeriodRange, reorderFavoritePeriodRanges, updateFavoritePeriodSettings } from "./db";
 import { retryCommandUsageDigest, retryScheduledReportDelivery } from "./scheduled";
 import { branches, regions, branchAssets, branchFinancialSnapshots, favoritePeriodRanges, checklistItems, checklistTemplates, correctiveActions, dashboardPreferences, documentVersions, documents, internalRequests, maintenanceTickets, qualityCases, tasks, users, userBranchPermissions, reportShareLogs, visitChecklistResults, visits, auditLogs, notifications, reportApprovals, scheduledReportRecipients, scheduledReportDeliveries, costCenterMappings, inventoryMovementSnapshots } from "../drizzle/schema";
 import { aggregateFinancialComparison } from "../shared/financials";
@@ -52,6 +52,12 @@ export const appRouter = router({
       reorder: protectedProcedure.input(z.object({ orderedIds: z.array(z.number().int().positive()).min(1) })).mutation(async ({ ctx, input }) => {
         const result = await reorderFavoritePeriodRanges(ctx.user.id, input.orderedIds);
         const db = await getDb(); if (db) await recordAudit(db, { actorId: ctx.user.id, entityType: "dashboard_period", action: "favorite_period_reordered", afterData: input });
+        return result;
+      }),
+      settings: protectedProcedure.input(z.object({ id: z.number().int().positive(), isPinned: z.boolean().optional(), shortcutKey: z.string().trim().max(24).nullable().optional() })).mutation(async ({ ctx, input }) => {
+        if (input.shortcutKey && !/^[a-z0-9]$/i.test(input.shortcutKey)) throw new TRPCError({ code: "BAD_REQUEST", message: "استخدم مفتاحًا واحدًا من الأحرف الإنجليزية أو الأرقام." });
+        const result = await updateFavoritePeriodSettings({ userId: ctx.user.id, ...input });
+        const db = await getDb(); if (db) await recordAudit(db, { actorId: ctx.user.id, entityType: "dashboard_period", entityId: input.id, action: "favorite_period_settings_updated", afterData: input });
         return result;
       }),
       remove: protectedProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
@@ -252,6 +258,13 @@ export const appRouter = router({
   reportApprovals: router({
     list: roleProcedure(["admin", "area_manager", "quality"]).input(z.object({ periodYear: z.number().int().min(2020).max(2100), periodMonth: z.number().int().min(1).max(12) })).query(async ({ input }) => { const db = await getDb(); if (!db) return []; return db.select().from(reportApprovals).where(eq(reportApprovals.periodYear, input.periodYear)); }),
     approve: roleProcedure(["admin", "area_manager", "quality"]).input(z.object({ periodYear: z.number().int().min(2020).max(2100), periodMonth: z.number().int().min(1).max(12), status: z.enum(["approved", "rejected"]), signatureText: z.string().min(2).max(220), notes: z.string().max(1000).optional() })).mutation(async ({ ctx, input }) => { const db = await getDb(); if (!db) throw new Error("Database unavailable"); const [existing] = await db.select().from(reportApprovals).where(and(eq(reportApprovals.approverId, ctx.user.id), eq(reportApprovals.periodYear, input.periodYear), eq(reportApprovals.periodMonth, input.periodMonth))).limit(1); const payload = { periodYear: input.periodYear, periodMonth: input.periodMonth, approverId: ctx.user.id, status: input.status, signatureText: input.signatureText, notes: input.notes, signedAt: new Date() }; if (existing) await db.update(reportApprovals).set(payload).where(eq(reportApprovals.id, existing.id)); else await db.insert(reportApprovals).values(payload); await recordAudit(db, { actorId: ctx.user.id, entityType: "monthly_report", action: input.status === "approved" ? "report_approved" : "report_rejected", afterData: payload }); return { success: true }; }),
+  }),
+  exports: router({
+    log: protectedProcedure.input(z.object({ format: z.enum(["csv", "excel", "pdf"]), report: z.string().trim().min(1).max(120), rowCount: z.number().int().min(0).max(100000).optional(), status: z.enum(["started", "success", "failed"]), error: z.string().max(500).optional(), filters: z.record(z.string(), z.unknown()).optional() })).mutation(async ({ ctx, input }) => {
+      const db = await getDb(); if (!db) throw new Error("Database unavailable");
+      await recordAudit(db, { actorId: ctx.user.id, entityType: "data_export", action: `export_${input.status}`, afterData: { format: input.format, report: input.report, rowCount: input.rowCount ?? 0, error: input.error, filters: input.filters } });
+      return { success: true };
+    }),
   }),
   audit: router({
     list: roleProcedure(["admin", "area_manager"]).input(z.object({ entityType: z.string().max(80).optional(), action: z.string().max(80).optional(), actorId: z.number().int().positive().optional(), branchId: z.number().int().positive().optional(), search: z.string().max(120).optional(), limit: z.number().int().min(1).max(200).default(100) }).optional()).query(async ({ input, ctx }) => {
