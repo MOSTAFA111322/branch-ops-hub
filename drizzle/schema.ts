@@ -13,6 +13,7 @@ export const users = mysqlTable("users", {
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
   isActive: boolean("isActive").default(true).notNull(),
+  canExportAuditLogs: boolean("canExportAuditLogs").default(false).notNull(),
 });
 
 export const userBranchPermissions = mysqlTable("userBranchPermissions", {

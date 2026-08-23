@@ -229,7 +229,7 @@ export const appRouter = router({
     adminList: roleProcedure(["admin"]).query(async () => {
       const db = await getDb();
       if (!db) throw new Error("Database unavailable");
-      return db.select({ id: users.id, openId: users.openId, name: users.name, email: users.email, role: users.role, regionId: users.regionId, branchId: users.branchId, isActive: users.isActive, createdAt: users.createdAt, lastSignedIn: users.lastSignedIn }).from(users).orderBy(users.name).limit(500);
+      return db.select({ id: users.id, openId: users.openId, name: users.name, email: users.email, role: users.role, regionId: users.regionId, branchId: users.branchId, isActive: users.isActive, canExportAuditLogs: users.canExportAuditLogs, createdAt: users.createdAt, lastSignedIn: users.lastSignedIn }).from(users).orderBy(users.name).limit(500);
     }),
     updateAccess: roleProcedure(["admin"]).input(z.object({
       userId: z.number().int().positive(),
@@ -238,13 +238,14 @@ export const appRouter = router({
       regionId: z.number().int().positive().nullable().optional(),
       branchId: z.number().int().positive().nullable().optional(),
       isActive: z.boolean().optional(),
+      canExportAuditLogs: z.boolean().optional(),
     })).mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new Error("Database unavailable");
-      const [current] = await db.select({ id: users.id, name: users.name, role: users.role, regionId: users.regionId, branchId: users.branchId, isActive: users.isActive }).from(users).where(eq(users.id, input.userId)).limit(1);
+      const [current] = await db.select({ id: users.id, name: users.name, role: users.role, regionId: users.regionId, branchId: users.branchId, isActive: users.isActive, canExportAuditLogs: users.canExportAuditLogs }).from(users).where(eq(users.id, input.userId)).limit(1);
       if (!current) throw new TRPCError({ code: "NOT_FOUND", message: "حساب المستخدم غير موجود" });
       if (input.userId === ctx.user.id && input.role !== "admin") throw new TRPCError({ code: "BAD_REQUEST", message: "لا يمكن لمدير النظام خفض صلاحية حسابه الذاتي" });
-      await db.update(users).set({ name: input.name, role: input.role, regionId: input.regionId, branchId: input.branchId, ...(input.isActive === undefined ? {} : { isActive: input.isActive }) }).where(eq(users.id, input.userId));
+      await db.update(users).set({ name: input.name, role: input.role, regionId: input.regionId, branchId: input.branchId, ...(input.isActive === undefined ? {} : { isActive: input.isActive }), ...(input.canExportAuditLogs === undefined ? {} : { canExportAuditLogs: input.canExportAuditLogs }) }).where(eq(users.id, input.userId));
       await recordAudit(db, { actorId: ctx.user.id, entityType: "user_access", entityId: input.userId, action: "update", beforeData: current, afterData: input });
       return { success: true };
     }),
@@ -265,7 +266,12 @@ export const appRouter = router({
       await recordAudit(db, { actorId: ctx.user.id, entityType: "data_export", action: `export_${input.status}`, afterData: { format: input.format, report: input.report, rowCount: input.rowCount ?? 0, error: input.error, filters: input.filters } });
       return { success: true };
     }),
-    list: roleProcedure(["admin", "area_manager"]).input(z.object({ format: z.enum(["csv", "excel", "pdf", "all"]).optional(), status: z.enum(["started", "success", "failed", "all"]).optional(), actorId: z.number().int().positive().optional(), from: z.string().date().optional(), to: z.string().date().optional() }).optional()).query(async ({ input }) => { const db = await getDb(); if (!db) return { rows: [], total: 0 }; const [auditRows, actorRows] = await Promise.all([db.select().from(auditLogs).where(eq(auditLogs.entityType, "data_export")).orderBy(desc(auditLogs.createdAt)).limit(2000), db.select({ id: users.id, name: users.name, email: users.email }).from(users).limit(2000)]); const actors = new Map(actorRows.map((actor) => [actor.id, actor])); const from = input?.from ? new Date(`${input.from}T00:00:00.000Z`) : undefined; const to = input?.to ? new Date(`${input.to}T23:59:59.999Z`) : undefined; const rows = auditRows.map((row) => { let data: any = {}; try { data = JSON.parse(row.afterData ?? "{}"); } catch {} const status = String(row.action).replace("export_", ""); return { id: row.id, createdAt: row.createdAt, actorId: row.actorId, actorName: row.actorId ? actors.get(row.actorId)?.name ?? actors.get(row.actorId)?.email ?? `#${row.actorId}` : "—", format: data.format ?? "—", report: data.report ?? "—", status, rowCount: Number(data.rowCount ?? 0), error: data.error ?? "", filters: data.filters ?? null }; }).filter((row) => (!input?.format || input.format === "all" || row.format === input.format) && (!input?.status || input.status === "all" || row.status === input.status) && (!input?.actorId || row.actorId === input.actorId) && (!from || row.createdAt >= from) && (!to || row.createdAt <= to)); return { rows, total: rows.length }; }),
+    list: roleProcedure(["admin", "area_manager"]).input(z.object({ format: z.enum(["csv", "excel", "pdf", "all"]).optional(), status: z.enum(["started", "success", "failed", "all"]).optional(), actorId: z.number().int().positive().optional(), from: z.string().date().optional(), to: z.string().date().optional() }).optional()).query(async ({ input }) => { const db = await getDb(); if (!db) return { rows: [], total: 0 }; const [auditRows, actorRows] = await Promise.all([db.select().from(auditLogs).where(eq(auditLogs.entityType, "data_export")).orderBy(desc(auditLogs.createdAt)).limit(2000), db.select({ id: users.id, name: users.name, email: users.email }).from(users).limit(2000)]); const actors = new Map(actorRows.map((actor) => [actor.id, actor])); const from = input?.from ? new Date(`${input.from}T00:00:00.000Z`) : undefined; const to = input?.to ? new Date(`${input.to}T23:59:59.999Z`) : undefined; const rows = auditRows.map((row) => { let data: any = {}; try { data = JSON.parse(row.afterData ?? "{}"); } catch {} const status = String(row.action).replace("export_", ""); return { id: row.id, createdAt: row.createdAt, actorId: row.actorId, actorName: row.actorId ? actors.get(row.actorId)?.name ?? actors.get(row.actorId)?.email ?? `#${row.actorId}` : "—", format: data.format ?? "—", report: data.report ?? "—", status, rowCount: Number(data.rowCount ?? 0), error: data.error ?? "", filters: data.filters ?? null }; }).filter((row) => (!input?.format || input.format === "all" || row.format === input.format) && (!input?.status || input.status === "all" || row.status === input.status) && (!input?.actorId || row.actorId === input.actorId) && (!from || row.createdAt >= from) && (!to || row.createdAt <= to)); const success = rows.filter((row) => row.status === "success").length; const failed = rows.filter((row) => row.status === "failed").length; const started = rows.filter((row) => row.status === "started").length; return { rows, total: rows.length, summary: { total: rows.length, success, failed, started, successRate: rows.length ? Math.round((success / rows.length) * 100) : 0 } }; }),
+    canExportAudit: protectedProcedure.query(({ ctx }) => ctx.user.role === "admin" || ctx.user.canExportAuditLogs),
+    authorizeAuditExport: protectedProcedure.mutation(async ({ ctx }) => {
+      if (ctx.user.role !== "admin" && !ctx.user.canExportAuditLogs) throw new TRPCError({ code: "FORBIDDEN", message: "لا تملك صلاحية تصدير سجل العمليات." });
+      return { allowed: true };
+    }),
   }),
   audit: router({
     list: roleProcedure(["admin", "area_manager"]).input(z.object({ entityType: z.string().max(80).optional(), action: z.string().max(80).optional(), actorId: z.number().int().positive().optional(), branchId: z.number().int().positive().optional(), search: z.string().max(120).optional(), limit: z.number().int().min(1).max(200).default(100) }).optional()).query(async ({ input, ctx }) => {

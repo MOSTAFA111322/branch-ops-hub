@@ -33,6 +33,17 @@ describe("final export and shortcut enhancements", () => {
     expect(exportAudit).toContain("المستخدم");
     expect(exportAudit).toContain("type=\"date\"");
     expect(exportAudit).toContain("سجل عمليات التصدير");
+    expect(exportAudit).toContain("summary");
+    expect(exportAudit).toContain("successRate");
+  });
+
+  it("protects export-audit downloads with an independent permission", () => {
+    expect(schema).toContain('canExportAuditLogs: boolean("canExportAuditLogs")');
+    expect(router).toContain("canExportAudit");
+    expect(router).toContain("authorizeAuditExport");
+    expect(router).toContain("لا تملك صلاحية تصدير سجل العمليات");
+    expect(exportAudit).toContain("authorizeExport.mutateAsync");
+    expect(exportAudit).toContain("ليس لديك صلاحية تصدير سجل العمليات");
   });
 
   it("records started, successful, and failed export attempts", () => {
