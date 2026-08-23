@@ -22,4 +22,9 @@ describe("financial snapshot approval wiring", () => {
     expect(home).toContain("معتمد");
     expect(home).toContain("trpc.financials.updateApproval.useMutation");
   });
+
+  it("keeps official expense and monthly comparison summaries approval-only", () => {
+    expect(routers).toContain(".filter((row) => row.approvalStatus === \"approved\")");
+    expect(routers).toContain("const snapshots = (await db.select().from(branchFinancialSnapshots)");
+  });
 });

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { TrpcContext } from "./_core/context";
 
-let storedRows: any[] = [{ id: 10, branchId: 1, periodYear: 2026, periodMonth: 8, revenue: "10000.00", costOfGoods: "4000.00", operatingExpenses: "2000.00", netProfit: "4000.00" }];
+let storedRows: any[] = [{ id: 10, branchId: 1, periodYear: 2026, periodMonth: 8, revenue: "10000.00", costOfGoods: "4000.00", operatingExpenses: "2000.00", netProfit: "4000.00", approvalStatus: "approved" }];
 const db = {
   select: () => ({ from: () => ({ where: async () => storedRows }) }),
   insert: () => ({ values: async (values: any) => { storedRows.push({ id: 11, ...values }); return [{ insertId: 11 }]; } }),
@@ -30,6 +30,12 @@ describe("monthly financial snapshots", () => {
     const summary = await appRouter.createCaller(admin).financials.expenseSummary({ year: 2026, month: 8 });
     expect(summary[0]).toMatchObject({ branchId: 1, branchName: "الفرع الرئيسي", salesCenter: true, operatingExpenses: 2000, netProfit: 4000 });
     await expect(appRouter.createCaller(viewer).financials.expenseSummary({ year: 2026, month: 8 })).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("excludes draft snapshots from official expense summaries", async () => {
+    storedRows.push({ id: 12, branchId: 1, periodYear: 2026, periodMonth: 8, operatingExpenses: "9000.00", netProfit: "9000.00", approvalStatus: "draft" });
+    const summary = await appRouter.createCaller(admin).financials.expenseSummary({ year: 2026, month: 8 });
+    expect(summary[0]).toMatchObject({ operatingExpenses: 2000, netProfit: 4000 });
   });
 
   it("enforces read scope, rejects unauthorized mutations, and validates periods", async () => {

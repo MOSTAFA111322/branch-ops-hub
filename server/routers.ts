@@ -549,7 +549,7 @@ export const appRouter = router({
       const db = await getDb();
       if (!db) throw new Error("Database unavailable");
       const visibleBranches = await listBranches(ctx.user);
-      const rows = await db.select().from(branchFinancialSnapshots).where(inArray(branchFinancialSnapshots.branchId, visibleBranches.map(branch => branch.id)));
+      const rows = (await db.select().from(branchFinancialSnapshots).where(inArray(branchFinancialSnapshots.branchId, visibleBranches.map(branch => branch.id)))).filter((row) => row.approvalStatus === "approved");
       return visibleBranches.map(branch => {
         const snapshot = rows.find(row => row.branchId === branch.id && row.periodYear === input.year && row.periodMonth === input.month);
         return { branchId: branch.id, branchName: branch.name, operationalType: branch.operationalType, salesCenter: branch.operationalType === "branch", netSales: Number(snapshot?.netSales ?? snapshot?.revenue ?? 0), netCost: Number(snapshot?.netCost ?? snapshot?.costOfGoods ?? 0), netProfitMargin: Number(snapshot?.netProfitMargin ?? 0), operatingExpenses: Number(snapshot?.operatingExpenses ?? 0), netProfit: Number(snapshot?.netProfit ?? 0) };
@@ -562,7 +562,7 @@ export const appRouter = router({
       const ids = visibleBranches.map(branch => branch.id);
       if (!ids.length) return { current: { year: input.year, month: input.month }, previous: { year: input.month === 1 ? input.year - 1 : input.year, month: input.month === 1 ? 12 : input.month - 1 }, rows: [] };
       const previous = input.month === 1 ? { year: input.year - 1, month: 12 } : { year: input.year, month: input.month - 1 };
-      const snapshots = await db.select().from(branchFinancialSnapshots).where(inArray(branchFinancialSnapshots.branchId, ids));
+      const snapshots = (await db.select().from(branchFinancialSnapshots).where(inArray(branchFinancialSnapshots.branchId, ids))).filter((row) => row.approvalStatus === "approved");
       const rows = aggregateFinancialComparison(visibleBranches, snapshots, input, previous);
       return { current: input, previous, rows };
     }),

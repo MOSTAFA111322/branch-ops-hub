@@ -38,5 +38,8 @@ describe("inventory analysis wiring", () => {
     expect(coordinateImporter).toContain("سجل تغييرات إحداثيات الفروع");
     expect(coordinateImporter).toContain("coordinateAudit");
     expect(component).toContain("window.print()");
+    expect(component).toContain("print-report-data");
+    expect(component).toContain("visibleRows.slice(0, 100)");
+    expect(component).toContain("disabled={!visibleRows.length || analysis.isFetching}");
   });
 });
