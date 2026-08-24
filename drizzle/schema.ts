@@ -3,9 +3,14 @@ import { int, mysqlEnum, mysqlTable, text, timestamp, varchar, decimal, boolean,
 export const users = mysqlTable("users", {
   id: int("id").autoincrement().primaryKey(),
   openId: varchar("openId", { length: 64 }).notNull().unique(),
+  username: varchar("username", { length: 80 }),
+  passwordHash: text("passwordHash"),
   name: text("name"),
   email: varchar("email", { length: 320 }),
   loginMethod: varchar("loginMethod", { length: 64 }),
+  failedLoginAttempts: int("failedLoginAttempts").default(0).notNull(),
+  lockedUntil: timestamp("lockedUntil"),
+  lastLocalSignIn: timestamp("lastLocalSignIn"),
   role: mysqlEnum("role", ["user", "admin", "area_manager", "branch_manager", "quality", "maintenance", "warehouse", "factory"]).default("user").notNull(),
   regionId: int("regionId"),
   branchId: int("branchId"),
@@ -14,7 +19,7 @@ export const users = mysqlTable("users", {
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
   isActive: boolean("isActive").default(true).notNull(),
   canExportAuditLogs: boolean("canExportAuditLogs").default(false).notNull(),
-});
+}, (table) => ({ usernameUnique: uniqueIndex("users_username_unique").on(table.username) }));
 
 export const userBranchPermissions = mysqlTable("userBranchPermissions", {
   id: int("id").autoincrement().primaryKey(),

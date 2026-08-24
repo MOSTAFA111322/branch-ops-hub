@@ -21,12 +21,14 @@ import {
 } from "@/components/ui/sidebar";
 import { startLogin } from "@/const";
 import { useTheme } from "@/contexts/ThemeContext";
+import { trpc } from "@/lib/trpc";
 import { useIsMobile } from "@/hooks/useMobile";
 import { LayoutDashboard, LogOut, Moon, PanelLeft, Sun, Users } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from './DashboardLayoutSkeleton';
 import { Button } from "./ui/button";
+import { Input } from "./ui/input";
 
 const menuItems = [
   { icon: LayoutDashboard, label: "Page 1", path: "/" },
@@ -47,7 +49,10 @@ export default function DashboardLayout({
     const saved = localStorage.getItem(SIDEBAR_WIDTH_KEY);
     return saved ? parseInt(saved, 10) : DEFAULT_WIDTH;
   });
-  const { loading, user } = useAuth();
+  const { loading, user, refresh } = useAuth();
+  const localLogin = trpc.auth.localLogin.useMutation({ onSuccess: async () => { await refresh(); } });
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
 
   useEffect(() => {
     localStorage.setItem(SIDEBAR_WIDTH_KEY, sidebarWidth.toString());
@@ -59,23 +64,25 @@ export default function DashboardLayout({
 
   if (!user) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="flex flex-col items-center gap-8 p-8 max-w-md w-full">
-          <div className="flex flex-col items-center gap-6">
-            <h1 className="text-2xl font-semibold tracking-tight text-center">
-              Sign in to continue
-            </h1>
-            <p className="text-sm text-muted-foreground text-center max-w-sm">
-              Access to this dashboard requires authentication. Continue to launch the login flow.
-            </p>
+      <div className="flex min-h-screen items-center justify-center bg-[#f5f8f4] p-4" dir="rtl">
+        <div className="grid w-full max-w-4xl overflow-hidden rounded-3xl border border-[#dfe9df] bg-white shadow-[0_18px_60px_rgba(39,70,48,0.12)] md:grid-cols-2">
+          <div className="flex flex-col justify-center bg-[#174c3d] p-8 text-white md:p-12">
+            <p className="text-sm font-semibold text-[#b9e4c5]">مركز متابعة وتحسين الفروع</p>
+            <h1 className="mt-4 text-3xl font-bold leading-tight">دخول آمن لفريق التشغيل</h1>
+            <p className="mt-4 text-sm leading-7 text-[#d8eee0]">استخدم حساب الشركة المحلي أو تابع عبر المصادقة المؤسسية. تتم حماية كلمات المرور بالتجزئة ولا تُعرض داخل النظام.</p>
           </div>
-          <Button
-            onClick={() => startLogin()}
-            size="lg"
-            className="w-full shadow-lg hover:shadow-xl transition-all"
-          >
-            Sign in
-          </Button>
+          <div className="p-8 md:p-12">
+            <h2 className="text-xl font-bold text-[#173d31]">تسجيل الدخول المحلي</h2>
+            <p className="mt-2 text-sm text-[#718078]">للحسابات الداخلية التي ينشئها مدير النظام.</p>
+            <form className="mt-6 space-y-4" onSubmit={(event) => { event.preventDefault(); localLogin.mutate({ username, password }); }}>
+              <label className="block text-sm font-medium text-[#526359]">اسم المستخدم<Input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" className="mt-1 h-11 rounded-xl" dir="ltr" required /></label>
+              <label className="block text-sm font-medium text-[#526359]">كلمة المرور<Input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" className="mt-1 h-11 rounded-xl" dir="ltr" required /></label>
+              {localLogin.error && <p className="rounded-xl bg-[#fff4ef] p-3 text-xs text-[#a44d36]" role="alert">{localLogin.error.message}</p>}
+              <Button type="submit" disabled={localLogin.isPending || !username || !password} className="h-11 w-full rounded-xl bg-[#17624b] hover:bg-[#12513e]">{localLogin.isPending ? "جارٍ التحقق..." : "دخول إلى النظام"}</Button>
+            </form>
+            <div className="my-6 flex items-center gap-3 text-xs text-[#89948b]"><span className="h-px flex-1 bg-[#e5eee6]" /><span>أو</span><span className="h-px flex-1 bg-[#e5eee6]" /></div>
+            <Button type="button" variant="outline" onClick={() => startLogin()} className="h-11 w-full rounded-xl border-[#b9d6c0] text-[#285c47]">الدخول عبر حساب المؤسسة (OAuth)</Button>
+          </div>
         </div>
       </div>
     );

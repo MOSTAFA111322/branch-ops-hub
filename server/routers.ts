@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { COOKIE_NAME } from "@shared/const";
+import { COOKIE_NAME, LOCAL_SESSION_COOKIE } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, roleProcedure, router } from "./_core/trpc";
@@ -12,6 +12,8 @@ import { branches, regions, branchAssets, branchFinancialSnapshots, favoritePeri
 import { aggregateFinancialComparison } from "../shared/financials";
 import { invokeLLM } from "./_core/llm";
 import { notifyOwner } from "./_core/notification";
+import { createLocalSession, hashPassword, isLocked, lockoutAfterFailedAttempt, verifyPassword } from "./localAuth";
+import { randomUUID } from "node:crypto";
 
 async function recordAudit(db: any, input: { actorId?: number; branchId?: number; entityType: string; entityId?: number; action: string; beforeData?: unknown; afterData?: unknown }) {
   await db.insert(auditLogs).values({
@@ -29,9 +31,29 @@ export const appRouter = router({
   system: systemRouter,
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
+    localLogin: publicProcedure.input(z.object({ username: z.string().trim().min(3).max(80), password: z.string().min(8).max(200) })).mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "قاعدة البيانات غير متاحة" });
+      const normalizedUsername = input.username.toLowerCase();
+      const [account] = await db.select().from(users).where(eq(users.username, normalizedUsername)).limit(1);
+      const genericFailure = () => { throw new TRPCError({ code: "UNAUTHORIZED", message: "اسم المستخدم أو كلمة المرور غير صحيحة" }); };
+      if (!account || !account.passwordHash || !account.isActive) return genericFailure();
+      if (isLocked(account.lockedUntil)) throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "تم إيقاف المحاولات مؤقتًا. أعد المحاولة بعد دقائق." });
+      if (!verifyPassword(input.password, account.passwordHash)) {
+        const attempts = account.failedLoginAttempts + 1;
+        await db.update(users).set({ failedLoginAttempts: attempts, lockedUntil: lockoutAfterFailedAttempt(attempts) }).where(eq(users.id, account.id));
+        return genericFailure();
+      }
+      const token = await createLocalSession({ id: account.id, username: account.username });
+      ctx.res.cookie(LOCAL_SESSION_COOKIE, token, { ...getSessionCookieOptions(ctx.req), maxAge: 8 * 60 * 60 * 1000 });
+      await db.update(users).set({ failedLoginAttempts: 0, lockedUntil: null, lastLocalSignIn: new Date(), lastSignedIn: new Date() }).where(eq(users.id, account.id));
+      await recordAudit(db, { actorId: account.id, entityType: "local_auth", action: "login_success" });
+      return { success: true, user: { id: account.id, name: account.name, username: account.username, role: account.role } } as const;
+    }),
     logout: publicProcedure.mutation(({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
+      ctx.res.clearCookie(LOCAL_SESSION_COOKIE, { ...cookieOptions, maxAge: -1 });
       return { success: true } as const;
     }),
   }),
@@ -230,7 +252,45 @@ export const appRouter = router({
     adminList: roleProcedure(["admin"]).query(async () => {
       const db = await getDb();
       if (!db) throw new Error("Database unavailable");
-      return db.select({ id: users.id, openId: users.openId, name: users.name, email: users.email, role: users.role, regionId: users.regionId, branchId: users.branchId, isActive: users.isActive, canExportAuditLogs: users.canExportAuditLogs, createdAt: users.createdAt, lastSignedIn: users.lastSignedIn }).from(users).orderBy(users.name).limit(500);
+      return db.select({ id: users.id, openId: users.openId, username: users.username, loginMethod: users.loginMethod, name: users.name, email: users.email, role: users.role, regionId: users.regionId, branchId: users.branchId, isActive: users.isActive, canExportAuditLogs: users.canExportAuditLogs, createdAt: users.createdAt, lastSignedIn: users.lastSignedIn, lastLocalSignIn: users.lastLocalSignIn, failedLoginAttempts: users.failedLoginAttempts }).from(users).orderBy(users.name).limit(500);
+    }),
+    createLocal: roleProcedure(["admin"]).input(z.object({ username: z.string().trim().min(3).max(80).regex(/^[a-zA-Z0-9._-]+$/), password: z.string().min(8).max(200), name: z.string().trim().min(2).max(160), email: z.string().email().max(320).optional(), role: z.enum(["user", "admin", "area_manager", "branch_manager", "quality", "maintenance", "warehouse", "factory"]).default("user"), regionId: z.number().int().positive().nullable().optional(), branchId: z.number().int().positive().nullable().optional(), isActive: z.boolean().default(true), canExportAuditLogs: z.boolean().default(false), branchPermissions: z.array(z.object({ branchId: z.number().int().positive(), canView: z.boolean().default(true), canExport: z.boolean().default(false), canShare: z.boolean().default(false) })).max(500).default([]) })).mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      const username = input.username.toLowerCase();
+      const [duplicate] = await db.select({ id: users.id }).from(users).where(eq(users.username, username)).limit(1);
+      if (duplicate) throw new TRPCError({ code: "CONFLICT", message: "اسم المستخدم مستخدم مسبقًا" });
+      if (input.role === "admin" && !input.isActive) throw new TRPCError({ code: "BAD_REQUEST", message: "لا يمكن إنشاء مدير غير نشط" });
+      const result = await db.insert(users).values({ openId: `local:${randomUUID()}`, username, passwordHash: hashPassword(input.password), name: input.name, email: input.email, loginMethod: "local", role: input.role, regionId: input.regionId, branchId: input.branchId, isActive: input.isActive, canExportAuditLogs: input.canExportAuditLogs });
+      const userId = result[0].insertId;
+      if (input.branchPermissions.length) await db.insert(userBranchPermissions).values(input.branchPermissions.map(permission => ({ userId, ...permission })));
+      await recordAudit(db, { actorId: ctx.user.id, entityType: "user_account", entityId: userId, action: "local_account_created", afterData: { ...input, password: undefined } });
+      return { success: true, userId };
+    }),
+    updateLocal: roleProcedure(["admin"]).input(z.object({ userId: z.number().int().positive(), username: z.string().trim().min(3).max(80).regex(/^[a-zA-Z0-9._-]+$/).optional(), password: z.string().min(8).max(200).optional(), name: z.string().trim().min(2).max(160).optional(), email: z.string().email().max(320).nullable().optional(), role: z.enum(["user", "admin", "area_manager", "branch_manager", "quality", "maintenance", "warehouse", "factory"]).optional(), regionId: z.number().int().positive().nullable().optional(), branchId: z.number().int().positive().nullable().optional(), isActive: z.boolean().optional(), canExportAuditLogs: z.boolean().optional(), branchPermissions: z.array(z.object({ branchId: z.number().int().positive(), canView: z.boolean().default(true), canExport: z.boolean().default(false), canShare: z.boolean().default(false) })).max(500).optional() })).mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      const [current] = await db.select().from(users).where(eq(users.id, input.userId)).limit(1);
+      if (!current) throw new TRPCError({ code: "NOT_FOUND", message: "حساب المستخدم غير موجود" });
+      if (input.userId === ctx.user.id && input.isActive === false) throw new TRPCError({ code: "BAD_REQUEST", message: "لا يمكن تعطيل حسابك الحالي" });
+      if (input.userId === ctx.user.id && input.role && input.role !== "admin") throw new TRPCError({ code: "BAD_REQUEST", message: "لا يمكن خفض صلاحية حساب مدير النظام الحالي" });
+      if (input.isActive === false && current.role === "admin") {
+        const activeAdmins = await db.select({ id: users.id }).from(users).where(and(eq(users.role, "admin"), eq(users.isActive, true)));
+        if (activeAdmins.length <= 1) throw new TRPCError({ code: "BAD_REQUEST", message: "لا يمكن تعطيل آخر مدير نشط" });
+      }
+      const patch = { username: input.username?.toLowerCase(), passwordHash: input.password ? hashPassword(input.password) : undefined, name: input.name, email: input.email, role: input.role, regionId: input.regionId, branchId: input.branchId, isActive: input.isActive, canExportAuditLogs: input.canExportAuditLogs, failedLoginAttempts: input.password ? 0 : undefined, lockedUntil: input.password ? null : undefined };
+      await db.update(users).set(patch).where(eq(users.id, input.userId));
+      if (input.branchPermissions) {
+        await db.delete(userBranchPermissions).where(eq(userBranchPermissions.userId, input.userId));
+        if (input.branchPermissions.length) await db.insert(userBranchPermissions).values(input.branchPermissions.map(permission => ({ userId: input.userId, ...permission })));
+      }
+      await recordAudit(db, { actorId: ctx.user.id, entityType: "user_account", entityId: input.userId, action: "local_account_updated", beforeData: { ...current, passwordHash: undefined }, afterData: { ...input, password: undefined } });
+      return { success: true };
+    }),
+    branchPermissions: roleProcedure(["admin"]).input(z.object({ userId: z.number().int().positive() })).query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      return db.select().from(userBranchPermissions).where(eq(userBranchPermissions.userId, input.userId)).orderBy(userBranchPermissions.branchId);
     }),
     updateAccess: roleProcedure(["admin"]).input(z.object({
       userId: z.number().int().positive(),
