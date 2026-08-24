@@ -10,7 +10,7 @@ describe("financial coverage dashboard wiring", () => {
   it("renders the live monthly coverage and missing centers without fallback data", () => {
     expect(db).toContain("financialCoverage");
     expect(db).toContain("missingCenters");
-    expect(home).toContain('"financialCoverage" in liveSummary');
+    expect(home).toContain('"financialCoverage" in executiveOps');
     expect(home).toContain("اكتمال البيانات المالية");
     expect(home).toContain("centersWithData");
     expect(home).toContain("missingCenters.slice(0, 8)");
@@ -19,5 +19,14 @@ describe("financial coverage dashboard wiring", () => {
   it("keeps missing-center actions connected to the selected branch", () => {
     expect(home).toContain("displayBranches.find((item) => item.id === center.id)");
     expect(home).toContain("setSelectedBranch(branch)");
+  });
+
+  it("keeps dashboard period wiring dynamic", () => {
+    expect(home).toContain("year: financialYear");
+    expect(home).toContain("month: financialMonth");
+    expect(home).toContain("initialYear={financialYear}");
+    expect(home).toContain("initialMonth={financialMonth}");
+    expect(home).not.toContain("يناير وفبراير");
+    expect(home).not.toContain("2026-01");
   });
 });

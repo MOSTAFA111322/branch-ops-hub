@@ -90,9 +90,10 @@ export const appRouter = router({
         return result;
       }),
     }),
-    summary: protectedProcedure.input(z.object({ from: z.string().date().optional(), to: z.string().date().optional() }).optional()).query(({ ctx, input }) => {
+    summary: protectedProcedure.input(z.object({ from: z.string().date().optional(), to: z.string().date().optional(), year: z.number().int().min(2000).max(2200).optional(), month: z.number().int().min(1).max(12).optional() }).optional()).query(({ ctx, input }) => {
       if (input?.from && input?.to && input.from > input.to) throw new TRPCError({ code: "BAD_REQUEST", message: "الفترة الزمنية غير صحيحة." });
-      return getDashboardSummary(ctx.user, { from: input?.from ? new Date(`${input.from}T00:00:00.000Z`) : undefined, to: input?.to ? new Date(`${input.to}T23:59:59.999Z`) : undefined });
+      if ((input?.year === undefined) !== (input?.month === undefined)) throw new TRPCError({ code: "BAD_REQUEST", message: "يجب تحديد السنة والشهر معًا." });
+      return getDashboardSummary(ctx.user, { from: input?.from ? new Date(`${input.from}T00:00:00.000Z`) : undefined, to: input?.to ? new Date(`${input.to}T23:59:59.999Z`) : undefined }, input?.year !== undefined && input?.month !== undefined ? { year: input.year, month: input.month } : undefined);
     }),
   }),
   inventory: router({

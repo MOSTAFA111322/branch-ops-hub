@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, gte, lt } from "drizzle-orm";
+import { and, desc, eq, inArray, gte, lt, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { branches, branchAssets, branchContracts, branchEmployees, branchEvents, branchInventory, branchFinancialSnapshots, correctiveActions, documents, internalRequests, maintenanceTickets, qualityCases, tasks, users, visits, inventoryMovementSnapshots, userBranchPermissions, favoritePeriodRanges, InsertUser, User } from "../drizzle/schema";
 import { ENV } from "./_core/env";
@@ -226,8 +226,10 @@ export async function getOperationsOverview(user: Pick<User, "id" | "role" | "re
 export async function getInventoryMovementAnalysis(user: Pick<User, "id" | "role" | "regionId" | "branchId">, filters: { itemQuery?: string; costCenterCode?: string; branchId?: number; from?: Date; to?: Date }) {
   const db = await getDb();
   if (!db) return { rows: [], monthlyReport: [], totals: { salesQuantity: 0, netSales: 0, netCost: 0, availableQuantity: 0 }, staleItems: [], topSellingItems: [] };
-  const visibleBranches = await db.select({ id: branches.id, regionId: branches.regionId }).from(branches);
-  const visibleIds = visibleBranches.filter((branch) => user.role === "admin" || (user.role === "area_manager" && branch.regionId === user.regionId) || ((user.role === "branch_manager" || user.role === "user") && branch.id === user.branchId)).map((branch) => branch.id);
+  const visibleBranches = await listBranches(user);
+  const visibleIds = visibleBranches.map((branch) => branch.id);
+  if (user.role !== "admin" && filters.branchId && !visibleIds.includes(filters.branchId)) return { rows: [], monthlyReport: [], totals: { salesQuantity: 0, netSales: 0, netCost: 0, availableQuantity: 0 }, staleItems: [], topSellingItems: [] };
+  if (user.role !== "admin" && !filters.branchId && !visibleIds.length) return { rows: [], monthlyReport: [], totals: { salesQuantity: 0, netSales: 0, netCost: 0, availableQuantity: 0 }, staleItems: [], topSellingItems: [] };
   const conditions = [] as any[];
   if (filters.branchId) conditions.push(eq(inventoryMovementSnapshots.branchId, filters.branchId)); else if (visibleIds.length) conditions.push(inArray(inventoryMovementSnapshots.branchId, visibleIds));
   if (filters.costCenterCode) conditions.push(eq(inventoryMovementSnapshots.costCenterCode, filters.costCenterCode));
@@ -239,12 +241,12 @@ export async function getInventoryMovementAnalysis(user: Pick<User, "id" | "role
   const groups = new Map<string, any>();
   const monthlyGroups = new Map<string, any>();
   for (const row of filtered) {
-    const key = `${row.itemCode}::${row.costCenterCode}`;
+    const key = `${row.branchId ?? "none"}::${row.itemCode}::${row.costCenterCode}`;
     const current = groups.get(key) ?? { itemCode: row.itemCode, itemName: row.itemName, costCenterCode: row.costCenterCode, salesQuantity: 0, netSales: 0, netCost: 0, availableQuantity: 0, availableCost: 0, stockAgeDays: 0, rowCount: 0 };
     current.salesQuantity += Number(row.salesQuantity ?? 0); current.netSales += Number(row.netSales ?? 0); current.netCost += Number(row.netCost ?? 0); current.availableQuantity += Number(row.availableQuantity ?? 0); current.availableCost += Number(row.availableCost ?? 0); current.stockAgeDays = Math.max(current.stockAgeDays, Number(row.stockAgeDays ?? 0)); current.rowCount += 1;
     groups.set(key, current);
     const month = new Date(row.periodStart).toISOString().slice(0, 7);
-    const monthlyKey = `${month}::${row.itemCode}::${row.costCenterCode}`;
+    const monthlyKey = `${month}::${row.branchId ?? "none"}::${row.itemCode}::${row.costCenterCode}`;
     const monthlyCurrent = monthlyGroups.get(monthlyKey) ?? { period: month, itemCode: row.itemCode, itemName: row.itemName, costCenterCode: row.costCenterCode, salesQuantity: 0, netSales: 0, netCost: 0, availableQuantity: 0, rowCount: 0 };
     monthlyCurrent.salesQuantity += Number(row.salesQuantity ?? 0); monthlyCurrent.netSales += Number(row.netSales ?? 0); monthlyCurrent.netCost += Number(row.netCost ?? 0); monthlyCurrent.availableQuantity += Number(row.availableQuantity ?? 0); monthlyCurrent.rowCount += 1;
     monthlyGroups.set(monthlyKey, monthlyCurrent);
@@ -256,33 +258,59 @@ export async function getInventoryMovementAnalysis(user: Pick<User, "id" | "role
   return { rows: rows.slice(0, 500), monthlyReport, totals: { salesQuantity: rows.reduce((sum, row) => sum + row.salesQuantity, 0), netSales: rows.reduce((sum, row) => sum + row.netSales, 0), netCost: rows.reduce((sum, row) => sum + row.netCost, 0), availableQuantity: rows.reduce((sum, row) => sum + row.availableQuantity, 0) }, staleItems, topSellingItems };
 }
 
-export async function getDashboardSummary(user: Pick<User, "id" | "role" | "regionId" | "branchId">, range?: { from?: Date; to?: Date }) {
+export async function getDashboardSummary(user: Pick<User, "id" | "role" | "regionId" | "branchId">, range?: { from?: Date; to?: Date }, selectedPeriod?: { year: number; month: number }) {
   const db = await getDb();
   if (!db) return { branches: [], activeBranchesCount: 0, inactiveBranchesCount: 0, representativesCount: 0, warehousesCount: 0, openActions: 0, upcomingVisits: 0, expiringDocuments: 0, openMaintenance: 0, tasks: [], alerts: [], smartInventorySummary: null };
   const allBranches = await db.select().from(branches).orderBy(desc(branches.healthScore));
-  const visibleBranches = user.role === "admin" ? allBranches : allBranches.filter((branch) => user.branchId ? branch.id === user.branchId : user.regionId ? branch.regionId === user.regionId : false);
+  const visibleBranches = await listBranches(user);
   const branchIds = visibleBranches.map((branch) => branch.id);
   if (!branchIds.length && user.role !== "admin") return { branches: [], activeBranchesCount: 0, inactiveBranchesCount: 0, representativesCount: 0, warehousesCount: 0, openActions: 0, upcomingVisits: 0, expiringDocuments: 0, openMaintenance: 0, tasks: [], alerts: [], smartInventorySummary: null };
   const scope = user.role === "admin" ? undefined : inArray(correctiveActions.branchId, branchIds);
+  const taskScope = user.role === "admin" ? eq(tasks.status, "todo") : and(eq(tasks.status, "todo"), or(eq(tasks.assigneeId, user.id), inArray(tasks.branchId, branchIds)));
   const [branchRows, actionRows, visitRows, documentRows, maintenanceRows, taskRows, inventoryRows] = await Promise.all([
     Promise.resolve(visibleBranches),
     scope ? db.select().from(correctiveActions).where(scope) : db.select().from(correctiveActions).where(eq(correctiveActions.status, "open")),
     user.role === "admin" ? db.select().from(visits).where(eq(visits.status, "scheduled")) : db.select().from(visits).where(inArray(visits.branchId, branchIds)),
     user.role === "admin" ? db.select().from(documents).where(eq(documents.status, "expiring")) : db.select().from(documents).where(inArray(documents.branchId, branchIds)),
     user.role === "admin" ? db.select().from(maintenanceTickets).where(eq(maintenanceTickets.status, "open")) : db.select().from(maintenanceTickets).where(inArray(maintenanceTickets.branchId, branchIds)),
-    db.select().from(tasks).where(eq(tasks.status, "todo")).orderBy(desc(tasks.createdAt)).limit(8),
+    db.select().from(tasks).where(taskScope).orderBy(desc(tasks.createdAt)).limit(8),
     user.role === "admin" ? db.select().from(inventoryMovementSnapshots) : db.select().from(inventoryMovementSnapshots).where(inArray(inventoryMovementSnapshots.branchId, branchIds)),
   ]);
   const branchName = new Map(visibleBranches.map((branch) => [branch.id, branch.name]));
-  const scopedInventoryRows = inventoryRows.filter((row) => (!range?.from || new Date(row.periodEnd).getTime() >= range.from.getTime()) && (!range?.to || new Date(row.periodStart).getTime() <= range.to.getTime()));
+  const selectedYear = selectedPeriod?.year ?? new Date().getFullYear();
+  const selectedMonth = selectedPeriod?.month ?? new Date().getMonth() + 1;
+  const selectedStart = new Date(Date.UTC(selectedYear, selectedMonth - 1, 1));
+  const selectedEnd = new Date(Date.UTC(selectedYear, selectedMonth, 1));
+  const previousStart = new Date(Date.UTC(selectedMonth === 1 ? selectedYear - 1 : selectedYear, selectedMonth === 1 ? 11 : selectedMonth - 2, 1));
+  const priorYearStart = new Date(Date.UTC(selectedYear - 1, selectedMonth - 1, 1));
+  const hasCustomRange = Boolean(range?.from || range?.to);
+  const scopedInventoryRows = inventoryRows.filter((row) => {
+    const start = new Date(row.periodStart).getTime();
+    const end = new Date(row.periodEnd).getTime();
+    if (hasCustomRange) return (!range?.from || end >= range.from.getTime()) && (!range?.to || start <= range.to.getTime());
+    return start >= Math.min(previousStart.getTime(), priorYearStart.getTime()) && start < selectedEnd.getTime();
+  });
+  const alertInventoryRows = hasCustomRange ? scopedInventoryRows : scopedInventoryRows.filter((row) => { const start = new Date(row.periodStart).getTime(); return start >= selectedStart.getTime() && start < selectedEnd.getTime(); });
   const inventoryGrouped = new Map<string, { itemName: string; branchId: number | null; available: number; sales: number }>();
-  for (const row of scopedInventoryRows) { const key = `${row.itemCode}::${row.costCenterCode}`; const current = inventoryGrouped.get(key) ?? { itemName: row.itemName, branchId: row.branchId, available: 0, sales: 0 }; current.available += Number(row.availableQuantity ?? 0); current.sales += Number(row.salesQuantity ?? 0); inventoryGrouped.set(key, current); }
+  for (const row of alertInventoryRows) { const key = `${row.branchId ?? "none"}::${row.itemCode}::${row.costCenterCode}`; const current = inventoryGrouped.get(key) ?? { itemName: row.itemName, branchId: row.branchId, available: 0, sales: 0 }; current.available += Number(row.availableQuantity ?? 0); current.sales += Number(row.salesQuantity ?? 0); inventoryGrouped.set(key, current); }
   const inventoryAlerts: Array<{ id: string; kind: "inventory_stale" | "inventory_low"; branchId: number; title: string; detail: string; tone: "amber" | "rose" }> = Array.from(inventoryGrouped.values()).reduce((alerts, row, index) => {
     if (row.available > 0 && row.sales <= 0) alerts.push({ id: `inventory-stale-${index}`, kind: "inventory_stale", branchId: row.branchId ?? 0, title: `صنف راكد: ${row.itemName}`, detail: `${row.branchId ? branchName.get(row.branchId) ?? "فرع غير محدد" : "مركز غير محدد"} · متاح ${row.available.toLocaleString("ar-SA")} دون مبيعات`, tone: "amber" });
     else if (row.available >= 0 && row.available <= 5 && row.sales > 0) alerts.push({ id: `inventory-low-${index}`, kind: "inventory_low", branchId: row.branchId ?? 0, title: `مخزون منخفض: ${row.itemName}`, detail: `${row.branchId ? branchName.get(row.branchId) ?? "فرع غير محدد" : "مركز غير محدد"} · المتاح ${row.available.toLocaleString("ar-SA")}`, tone: "rose" });
     return alerts;
   }, [] as Array<{ id: string; kind: "inventory_stale" | "inventory_low"; branchId: number; title: string; detail: string; tone: "amber" | "rose" }>);
-  const monthlyInventory = new Map<string, number>(); for (const row of scopedInventoryRows) { const period = new Date(row.periodStart).toISOString().slice(0, 7); monthlyInventory.set(period, (monthlyInventory.get(period) ?? 0) + Number(row.netSales ?? 0)); } const periods = Array.from(monthlyInventory.keys()).sort(); const currentPeriod = periods.at(-1) ?? null; const previousPeriod = periods.at(-2) ?? null; const currentSales = currentPeriod ? monthlyInventory.get(currentPeriod) ?? 0 : 0; const previousSales = previousPeriod ? monthlyInventory.get(previousPeriod) ?? 0 : 0; const salesChangePercent = previousSales ? ((currentSales - previousSales) / Math.abs(previousSales)) * 100 : null; const priorYearPeriod = currentPeriod ? `${Number(currentPeriod.slice(0, 4)) - 1}${currentPeriod.slice(4)}` : null; const priorYearSales = priorYearPeriod ? monthlyInventory.get(priorYearPeriod) ?? 0 : 0; const yearOverYearChangePercent = priorYearSales ? ((currentSales - priorYearSales) / Math.abs(priorYearSales)) * 100 : null; const staleItems = Array.from(inventoryGrouped.values()).filter((row) => row.available > 0 && row.sales <= 0).slice(0, 5).map((row) => ({ itemName: row.itemName, branchId: row.branchId, available: row.available })); const lowStockItems = Array.from(inventoryGrouped.values()).filter((row) => row.available >= 0 && row.available <= 5 && row.sales > 0).slice(0, 5).map((row) => ({ itemName: row.itemName, branchId: row.branchId, available: row.available }));
+  const monthlyInventory = new Map<string, number>();
+  for (const row of scopedInventoryRows) { const period = new Date(row.periodStart).toISOString().slice(0, 7); monthlyInventory.set(period, (monthlyInventory.get(period) ?? 0) + Number(row.netSales ?? 0)); }
+  const periods = Array.from(monthlyInventory.keys()).sort();
+  const currentPeriod = hasCustomRange ? periods.at(-1) ?? null : `${selectedYear}-${String(selectedMonth).padStart(2, "0")}`;
+  const previousPeriod = hasCustomRange ? periods.at(-2) ?? null : `${previousStart.getUTCFullYear()}-${String(previousStart.getUTCMonth() + 1).padStart(2, "0")}`;
+  const currentSales = currentPeriod ? monthlyInventory.get(currentPeriod) ?? 0 : 0;
+  const previousSales = previousPeriod ? monthlyInventory.get(previousPeriod) ?? 0 : 0;
+  const salesChangePercent = previousSales ? ((currentSales - previousSales) / Math.abs(previousSales)) * 100 : null;
+  const priorYearPeriod = currentPeriod ? `${Number(currentPeriod.slice(0, 4)) - 1}${currentPeriod.slice(4)}` : null;
+  const priorYearSales = priorYearPeriod ? monthlyInventory.get(priorYearPeriod) ?? 0 : 0;
+  const yearOverYearChangePercent = priorYearSales ? ((currentSales - priorYearSales) / Math.abs(priorYearSales)) * 100 : null;
+  const staleItems = Array.from(inventoryGrouped.values()).filter((row) => row.available > 0 && row.sales <= 0).slice(0, 5).map((row) => ({ itemName: row.itemName, branchId: row.branchId, available: row.available }));
+  const lowStockItems = Array.from(inventoryGrouped.values()).filter((row) => row.available >= 0 && row.available <= 5 && row.sales > 0).slice(0, 5).map((row) => ({ itemName: row.itemName, branchId: row.branchId, available: row.available }));
   const alerts = [
     ...documentRows.slice(0, 5).map((row) => ({ id: `document-${row.id}`, kind: "document" as const, branchId: row.branchId, title: row.title, detail: `${branchName.get(row.branchId) ?? "فرع غير محدد"} · وثيقة تحتاج انتباه`, tone: "rose" as const })),
     ...maintenanceRows.slice(0, 5).map((row) => ({ id: `maintenance-${row.id}`, kind: "maintenance" as const, branchId: row.branchId, title: row.title, detail: `${branchName.get(row.branchId) ?? "فرع غير محدد"} · بلاغ صيانة مفتوح`, tone: "amber" as const })),

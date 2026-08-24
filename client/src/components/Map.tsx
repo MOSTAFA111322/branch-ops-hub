@@ -156,7 +156,7 @@ export function MapView({
       setLoadState("ready");
       onMapReady?.(map.current);
     } catch (error) {
-      console.error("Map initialization failed", error);
+      console.warn("Map initialization failed; using the Arabic fallback", error);
       setLoadState("error");
     }
   });

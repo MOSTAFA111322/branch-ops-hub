@@ -20,7 +20,7 @@ describe("inventory analysis wiring", () => {
     const component = readFileSync(resolve(process.cwd(), "client/src/components/InventoryAnalysisView.tsx"), "utf8");
     const coordinateImporter = readFileSync(resolve(process.cwd(), "client/src/components/CoordinateCsvImporter.tsx"), "utf8");
     expect(home).toContain('label: "تحليل حركة الأصناف"');
-    expect(home).toContain("<InventoryAnalysisView initialFrom={customFrom} initialTo={customTo} />");
+    expect(home).toContain("<InventoryAnalysisView initialFrom={customFrom} initialTo={customTo} initialYear={financialYear} initialMonth={financialMonth} />");
     expect(home).toContain('aria-label="بداية النطاق المخصص"');
     expect(home).toContain("(summaryFetching || executiveFetching)");
     expect(home).toContain("تحديد صنف للمساعد");

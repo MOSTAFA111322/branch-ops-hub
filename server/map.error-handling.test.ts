@@ -10,6 +10,7 @@ describe("map and production-build safeguards", () => {
   it("rejects failed map loads and shows an Arabic fallback instead of throwing", () => {
     expect(map).toContain('reject(new Error("Failed to load Google Maps script"))');
     expect(map).toContain('loadState === "error"');
+    expect(map).toContain('console.warn("Map initialization failed; using the Arabic fallback", error)');
     expect(map).toContain("تعذر تحميل الخريطة حاليًا");
     expect(map).toContain("يمكن متابعة بيانات الفروع من الجداول والتقارير");
     expect(map).toContain("const mapHost = useRef<HTMLDivElement>(null);");
