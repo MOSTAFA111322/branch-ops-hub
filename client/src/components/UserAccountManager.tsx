@@ -41,13 +41,16 @@ export function UserAccountManager() {
   const [statusFilter, setStatusFilter] = useState("all");
   const branches = permissions.data?.branches ?? [];
   const users = query.data ?? [];
+  const permissionBranchesByUser = useMemo(() => new Map((permissions.data?.permissions ?? []).reduce((groups, permission) => { const list = groups.get(permission.userId) ?? []; if (permission.canView) list.push(String(permission.branchId)); groups.set(permission.userId, list); return groups; }, new Map<number, string[]>())), [permissions.data?.permissions]);
   const filteredUsers = useMemo(() => {
     const term = search.trim().toLocaleLowerCase("ar");
     return users.filter((item) => {
-      const haystack = `${item.name ?? ""} ${item.email ?? ""} ${item.id}`.toLocaleLowerCase("ar");
-      return (!term || haystack.includes(term)) && (roleFilter === "all" || item.role === roleFilter) && (branchFilter === "all" || String(item.branchId ?? "") === branchFilter) && (statusFilter === "all" || (statusFilter === "active" ? item.isActive !== false : item.isActive === false));
+      const haystack = `${item.name ?? ""} ${item.username ?? ""} ${item.email ?? ""} ${item.id}`.toLocaleLowerCase("ar");
+      const allowedBranches = permissionBranchesByUser.get(item.id) ?? [];
+      const matchesBranch = branchFilter === "all" || String(item.branchId ?? "") === branchFilter || allowedBranches.includes(branchFilter);
+      return (!term || haystack.includes(term)) && (roleFilter === "all" || item.role === roleFilter) && matchesBranch && (statusFilter === "all" || (statusFilter === "active" ? item.isActive !== false : item.isActive === false));
     });
-  }, [users, search, roleFilter, branchFilter, statusFilter]);
+  }, [users, search, roleFilter, branchFilter, statusFilter, permissionBranchesByUser]);
   const selected = users.find((item) => item.id === selectedId);
   const choose = (id: number) => { const item = users.find((row) => row.id === id); if (!item) return; setSelectedId(id); setName(item.name ?? ""); setUsername(item.username ?? ""); setPassword(""); setRole(item.role as Role); setBranchId(item.branchId ? String(item.branchId) : ""); setSelectedBranchIds((permissions.data?.permissions ?? []).filter((permission) => permission.userId === id && permission.canView).map((permission) => permission.branchId)); setRegionId(item.regionId ? String(item.regionId) : ""); setIsActive(item.isActive !== false); setCanExportAuditLogs(item.canExportAuditLogs === true); };
   const [isActive, setIsActive] = useState(true);
