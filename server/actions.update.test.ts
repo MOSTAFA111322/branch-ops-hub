@@ -8,6 +8,7 @@ const successDb = {
       where: () => ({
         limit: async () => [{ id: 1 }],
       }),
+      orderBy: async () => [{ id: 1 }],
     }),
   }),
   insert: () => ({
