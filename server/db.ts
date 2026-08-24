@@ -189,12 +189,15 @@ export async function getOperationsOverview(user: Pick<User, "id" | "role" | "re
   });
   const qualitySummary = { averageCompletenessRate: dataQuality.length ? Math.round(dataQuality.reduce((sum, item) => sum + item.completenessRate, 0) / dataQuality.length) : null, branchesNeedingData: dataQuality.filter((item) => item.missingFields.length > 0).length, averageVisitCommitmentRate: (() => { const rows = dataQuality.filter((item) => item.visitCommitmentRate !== null); return rows.length ? Math.round(rows.reduce((sum, item) => sum + (item.visitCommitmentRate ?? 0), 0) / rows.length) : null; })() };
   const comparison = visible.map((branch, index) => ({ id: branch.id, name: branch.name, city: branch.city, healthScore: branch.healthScore, openActions: branch.openActions, riskLevel: Number(branch.healthScore) < 75 ? "مرتفع" : Number(branch.healthScore) < 85 ? "متوسط" : "مستقر", activityCount: activityRows.filter((row) => row.branchId === branch.id).length, period, rank: index + 1 }));
-  const visibleFinancialRows = (user.role === "admin" ? financialRows : financialRows.filter((row) => ids.includes(row.branchId))) as Array<{ branchId: number; periodYear: number; periodMonth: number; revenue: string | number; netProfit: string | number; operatingExpenses?: string | number }>;
-  const trendMap = new Map<string, { period: string; year: number; month: number; revenue: number; netProfit: number; branches: number }>();
+  const visibleFinancialRows = (user.role === "admin" ? financialRows : financialRows.filter((row) => ids.includes(row.branchId))) as Array<{ branchId: number; periodYear: number; periodMonth: number; revenue: string | number; netSales?: string | number; netCost?: string | number; netProfit: string | number; operatingExpenses?: string | number; approvalStatus?: string }>;
+  const trendMap = new Map<string, { period: string; year: number; month: number; revenue: number; netSales: number; netCost: number; expenses: number; netProfit: number; branches: number }>();
   for (const row of visibleFinancialRows) {
     const key = `${row.periodYear}-${String(row.periodMonth).padStart(2, "0")}`;
-    const current = trendMap.get(key) ?? { period: key, year: row.periodYear, month: row.periodMonth, revenue: 0, netProfit: 0, branches: 0 };
+    const current = trendMap.get(key) ?? { period: key, year: row.periodYear, month: row.periodMonth, revenue: 0, netSales: 0, netCost: 0, expenses: 0, netProfit: 0, branches: 0 };
     current.revenue += Number(row.revenue ?? 0);
+    current.netSales += Number(row.netSales ?? row.revenue ?? 0);
+    current.netCost += Number(row.netCost ?? 0);
+    current.expenses += Number(row.operatingExpenses ?? 0);
     current.netProfit += Number(row.netProfit ?? 0);
     current.branches += 1;
     trendMap.set(key, current);
