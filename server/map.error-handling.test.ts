@@ -12,6 +12,9 @@ describe("map and production-build safeguards", () => {
     expect(map).toContain('loadState === "error"');
     expect(map).toContain("تعذر تحميل الخريطة حاليًا");
     expect(map).toContain("يمكن متابعة بيانات الفروع من الجداول والتقارير");
+    expect(map).toContain("const mapHost = useRef<HTMLDivElement>(null);");
+    expect(map).toContain("new window.google.maps.Map(mapHost.current");
+    expect(map).toContain('<div ref={mapHost} className="absolute inset-0" aria-hidden="true" />');
   });
 
   it("keeps the JSX location transform limited to development mode", () => {

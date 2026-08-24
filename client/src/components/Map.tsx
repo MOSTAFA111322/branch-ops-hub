@@ -133,6 +133,7 @@ export function MapView({
   onMapReady,
 }: MapViewProps) {
   const mapContainer = useRef<HTMLDivElement>(null);
+  const mapHost = useRef<HTMLDivElement>(null);
   const map = useRef<google.maps.Map | null>(null);
   const [loadState, setLoadState] = useState<"loading" | "ready" | "error">("loading");
 
@@ -140,10 +141,10 @@ export function MapView({
     try {
       setLoadState("loading");
       await loadMapScript();
-      if (!mapContainer.current || !window.google?.maps) {
-        throw new Error("Map container or Google Maps API is unavailable");
+      if (!mapHost.current || !window.google?.maps) {
+        throw new Error("Map host or Google Maps API is unavailable");
       }
-      map.current = new window.google.maps.Map(mapContainer.current, {
+      map.current = new window.google.maps.Map(mapHost.current, {
         zoom: initialZoom,
         center: initialCenter,
         mapTypeControl: true,
@@ -171,9 +172,10 @@ export function MapView({
       aria-busy={loadState === "loading"}
       aria-label="الخريطة التشغيلية"
     >
-      {loadState === "loading" && <p className="text-xs text-[#66806f]">جارٍ تحميل الخريطة…</p>}
+      <div ref={mapHost} className="absolute inset-0" aria-hidden="true" />
+      {loadState === "loading" && <p className="relative z-10 text-xs text-[#66806f]">جارٍ تحميل الخريطة…</p>}
       {loadState === "error" && (
-        <div className="mx-5 max-w-md rounded-2xl border border-[#ead9b7] bg-[#fffaf0] px-5 py-4 text-center text-xs text-[#846a3b]">
+        <div className="relative z-10 mx-5 max-w-md rounded-2xl border border-[#ead9b7] bg-[#fffaf0] px-5 py-4 text-center text-xs text-[#846a3b]">
           <p className="font-semibold">تعذر تحميل الخريطة حاليًا</p>
           <p className="mt-1 leading-5">يمكن متابعة بيانات الفروع من الجداول والتقارير، ثم إعادة المحاولة بعد التحقق من إعدادات خدمة الخرائط.</p>
         </div>
