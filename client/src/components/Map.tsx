@@ -76,7 +76,7 @@
 
 /// <reference types="@types/google.maps" />
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usePersistFn } from "@/hooks/usePersistFn";
 import { cn } from "@/lib/utils";
 
@@ -93,17 +93,27 @@ const FORGE_BASE_URL =
 const MAPS_PROXY_URL = `${FORGE_BASE_URL}/v1/maps/proxy`;
 
 function loadMapScript() {
-  return new Promise(resolve => {
+  return new Promise<void>((resolve, reject) => {
+    if (window.google?.maps) {
+      resolve();
+      return;
+    }
+
     const script = document.createElement("script");
     script.src = `${MAPS_PROXY_URL}/maps/api/js?key=${API_KEY}&v=weekly&libraries=marker,places,geocoding,geometry`;
     script.async = true;
     script.crossOrigin = "anonymous";
     script.onload = () => {
-      resolve(null);
-      script.remove(); // Clean up immediately
+      script.remove();
+      if (window.google?.maps) {
+        resolve();
+      } else {
+        reject(new Error("Google Maps API loaded without a usable maps object"));
+      }
     };
     script.onerror = () => {
-      console.error("Failed to load Google Maps script");
+      script.remove();
+      reject(new Error("Failed to load Google Maps script"));
     };
     document.head.appendChild(script);
   });
@@ -124,32 +134,50 @@ export function MapView({
 }: MapViewProps) {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<google.maps.Map | null>(null);
+  const [loadState, setLoadState] = useState<"loading" | "ready" | "error">("loading");
 
   const init = usePersistFn(async () => {
-    await loadMapScript();
-    if (!mapContainer.current) {
-      console.error("Map container not found");
-      return;
-    }
-    map.current = new window.google.maps.Map(mapContainer.current, {
-      zoom: initialZoom,
-      center: initialCenter,
-      mapTypeControl: true,
-      fullscreenControl: true,
-      zoomControl: true,
-      streetViewControl: true,
-      mapId: "DEMO_MAP_ID",
-    });
-    if (onMapReady) {
-      onMapReady(map.current);
+    try {
+      setLoadState("loading");
+      await loadMapScript();
+      if (!mapContainer.current || !window.google?.maps) {
+        throw new Error("Map container or Google Maps API is unavailable");
+      }
+      map.current = new window.google.maps.Map(mapContainer.current, {
+        zoom: initialZoom,
+        center: initialCenter,
+        mapTypeControl: true,
+        fullscreenControl: true,
+        zoomControl: true,
+        streetViewControl: true,
+        mapId: "DEMO_MAP_ID",
+      });
+      setLoadState("ready");
+      onMapReady?.(map.current);
+    } catch (error) {
+      console.error("Map initialization failed", error);
+      setLoadState("error");
     }
   });
 
   useEffect(() => {
-    init();
+    void init();
   }, [init]);
 
   return (
-    <div ref={mapContainer} className={cn("w-full h-[500px]", className)} />
+    <div
+      ref={mapContainer}
+      className={cn("relative flex w-full h-[500px] items-center justify-center bg-[#f2f7f2]", className)}
+      aria-busy={loadState === "loading"}
+      aria-label="الخريطة التشغيلية"
+    >
+      {loadState === "loading" && <p className="text-xs text-[#66806f]">جارٍ تحميل الخريطة…</p>}
+      {loadState === "error" && (
+        <div className="mx-5 max-w-md rounded-2xl border border-[#ead9b7] bg-[#fffaf0] px-5 py-4 text-center text-xs text-[#846a3b]">
+          <p className="font-semibold">تعذر تحميل الخريطة حاليًا</p>
+          <p className="mt-1 leading-5">يمكن متابعة بيانات الفروع من الجداول والتقارير، ثم إعادة المحاولة بعد التحقق من إعدادات خدمة الخرائط.</p>
+        </div>
+      )}
+    </div>
   );
 }
