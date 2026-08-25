@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
-import { AlertTriangle, CheckCircle2, Clock3, FileText, Play, Pause, RefreshCw, Download, RotateCcw, Search, Send, Trash2 } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Clock3, FileText, Play, Pause, RefreshCw, Download, RotateCcw, Search, Send, Trash2, ArrowDownAZ, ArrowUpAZ } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,7 @@ export function ScheduledReportsView({ canRetry = false }: { canRetry?: boolean 
   const [readyReportType, setReadyReportType] = useState("all");
   const [readyReportDateFrom, setReadyReportDateFrom] = useState("");
   const [readyReportDateTo, setReadyReportDateTo] = useState("");
+  const [readyReportSort, setReadyReportSort] = useState<"newest" | "oldest">("newest");
   useEffect(() => {
     const loadReadyReports = () => { try { setReadyReports(JSON.parse(localStorage.getItem("branch-ops-ready-reports") ?? "[]") as ReadyReport[]); } catch { setReadyReports([]); } };
     loadReadyReports();
@@ -32,6 +33,11 @@ export function ScheduledReportsView({ canRetry = false }: { canRetry?: boolean 
     const matchesTo = !readyReportDateTo || createdAt <= new Date(`${readyReportDateTo}T23:59:59`);
     return matchesSearch && matchesType && matchesFrom && matchesTo;
   }), [readyReports, readyReportSearch, readyReportType, readyReportDateFrom, readyReportDateTo]);
+  const sortedReadyReports = useMemo(() => [...filteredReadyReports].sort((a, b) => {
+    const dateDifference = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+    if (dateDifference !== 0) return readyReportSort === "newest" ? -dateDifference : dateDifference;
+    return readyReportSort === "newest" ? b.title.localeCompare(a.title, "ar") : a.title.localeCompare(b.title, "ar");
+  }), [filteredReadyReports, readyReportSort]);
   const readyReportTypes = useMemo(() => Array.from(new Set(readyReports.map((report) => report.title || "تقرير تنفيذي مالي"))), [readyReports]);
   const [warningFailureRate, setWarningFailureRate] = useState(20);
   const [warningLatencyMs, setWarningLatencyMs] = useState(30000);
@@ -141,9 +147,10 @@ export function ScheduledReportsView({ canRetry = false }: { canRetry?: boolean 
         <CardHeader><div className="flex items-center justify-between gap-2"><div><CardTitle id="ready-reports-title" className="flex items-center gap-2 text-base"><FileText className="h-4 w-4 text-[#4d8068]" /> التقارير الجاهزة للمشاركة</CardTitle><p className="mt-1 text-xs text-[#89948b]">تُنشأ الجدولة التقرير وتحفظه هنا. المشاركة عبر واتساب العادي يدوية: يفتح النظام المحادثة والرسالة، ثم يضغط المستخدم إرسال ويرفق PDF عند الحاجة.</p></div><Badge variant="outline" className="rounded-full text-[10px]">{readyReports.length} تقرير</Badge></div></CardHeader>
         <CardContent>
           {readyReports.length === 0 ? <p className="rounded-xl bg-[#f7faf7] p-4 text-center text-xs text-[#89948b]">لا توجد تقارير جاهزة للمشاركة بعد.</p> : <>
-            <div className="mb-3 grid gap-2 rounded-xl bg-[#f7faf7] p-3 sm:grid-cols-2 lg:grid-cols-4"><label className="relative sm:col-span-2"><Search className="absolute right-3 top-2.5 h-4 w-4 text-[#89948b]" /><Input value={readyReportSearch} onChange={(event) => setReadyReportSearch(event.target.value)} placeholder="بحث في العنوان والفترة والمركز" className="h-9 rounded-lg pr-9 text-xs" aria-label="بحث في التقارير الجاهزة" /></label><select value={readyReportType} onChange={(event) => setReadyReportType(event.target.value)} className="h-9 rounded-lg border border-input bg-background px-2 text-xs" aria-label="نوع التقرير"><option value="all">كل أنواع التقارير</option>{readyReportTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select><div className="flex gap-2"><Input type="date" value={readyReportDateFrom} onChange={(event) => setReadyReportDateFrom(event.target.value)} className="h-9 min-w-0 rounded-lg text-xs" aria-label="من تاريخ سجل التقارير" /><Input type="date" value={readyReportDateTo} onChange={(event) => setReadyReportDateTo(event.target.value)} className="h-9 min-w-0 rounded-lg text-xs" aria-label="إلى تاريخ سجل التقارير" /></div></div>
+            <div className="mb-3 grid gap-2 rounded-xl bg-[#f7faf7] p-3 sm:grid-cols-2 lg:grid-cols-4"><label className="relative sm:col-span-2"><Search className="absolute right-3 top-2.5 h-4 w-4 text-[#89948b]" /><Input value={readyReportSearch} onChange={(event) => setReadyReportSearch(event.target.value)} placeholder="بحث في العنوان والفترة والمركز" className="h-9 rounded-lg pr-9 text-xs" aria-label="بحث في التقارير الجاهزة" /></label><select value={readyReportType} onChange={(event) => setReadyReportType(event.target.value)} className="h-9 rounded-lg border border-input bg-background px-2 text-xs" aria-label="نوع التقرير"><option value="all">كل أنواع التقارير</option>{readyReportTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select><label className="flex items-center gap-1 rounded-lg border border-input bg-background px-2"><span className="sr-only">ترتيب سجل التقارير</span>{readyReportSort === "newest" ? <ArrowDownAZ className="h-3.5 w-3.5 text-[#4d8068]" /> : <ArrowUpAZ className="h-3.5 w-3.5 text-[#4d8068]" />}<select value={readyReportSort} onChange={(event) => setReadyReportSort(event.target.value as typeof readyReportSort)} className="h-8 bg-transparent text-xs outline-none" aria-label="ترتيب سجل التقارير"><option value="newest">الأحدث أولًا</option><option value="oldest">الأقدم أولًا</option></select></label><div className="flex gap-2">
+<Input type="date" value={readyReportDateFrom} onChange={(event) => setReadyReportDateFrom(event.target.value)} className="h-9 min-w-0 rounded-lg text-xs" aria-label="من تاريخ سجل التقارير" /><Input type="date" value={readyReportDateTo} onChange={(event) => setReadyReportDateTo(event.target.value)} className="h-9 min-w-0 rounded-lg text-xs" aria-label="إلى تاريخ سجل التقارير" /></div></div>
             <div className="space-y-2">
-              {filteredReadyReports.slice(0, 8).map((report) => (
+              {sortedReadyReports.slice(0, 8).map((report) => (
                 <div key={report.id} className="flex flex-col gap-2 rounded-xl border border-[#edf1ed] bg-[#fbfdfb] p-3 md:flex-row md:items-center md:justify-between">
                   <div className="min-w-0"><p className="truncate text-xs font-semibold text-[#1c2820]">{report.title || "تقرير تنفيذي مالي"}</p><p className="mt-1 text-[10px] text-[#89948b]">الفترة: {report.period} · المركز: {report.costCenter === "all" ? "كل المراكز" : report.costCenter} · الرقم: {report.phone}</p><p className="mt-1 text-[10px] text-[#4d8068]">{report.status} · {new Date(report.createdAt).toLocaleString("ar-SA")}</p></div>
                   <Button size="sm" variant="outline" className="gap-1 rounded-xl text-[11px]" onClick={() => window.open("https://wa.me/" + report.phone + "?text=" + encodeURIComponent("تقرير: " + (report.title || "التقرير التنفيذي المالي") + "\nالفترة: " + report.period + "\nالتقرير جاهز للمراجعة والمشاركة اليدوية."), "_blank", "noopener,noreferrer")}><Send className="h-3.5 w-3.5" />فتح واتساب</Button>

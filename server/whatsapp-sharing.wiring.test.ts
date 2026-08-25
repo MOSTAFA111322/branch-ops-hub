@@ -5,6 +5,7 @@ import path from "node:path";
 const root = path.resolve(process.cwd());
 const exportSource = fs.readFileSync(path.join(root, "client/src/components/ExecutiveDashboardExport.tsx"), "utf8");
 const scheduledSource = fs.readFileSync(path.join(root, "client/src/components/ScheduledReportsView.tsx"), "utf8");
+const homeSource = fs.readFileSync(path.join(root, "client/src/pages/Home.tsx"), "utf8");
 
 describe("manual WhatsApp report sharing", () => {
   it("provides an explicit manual WhatsApp action and international phone validation", () => {
@@ -19,6 +20,24 @@ describe("manual WhatsApp report sharing", () => {
     expect(scheduledSource).toContain("التقارير الجاهزة للمشاركة");
     expect(scheduledSource).toContain("فتح واتساب");
     expect(scheduledSource).toContain("مسح السجل المحلي");
+  });
+
+  it("provides a unified message and PDF preview before opening WhatsApp", () => {
+    expect(exportSource).toContain("sharePreviewOpen");
+    expect(exportSource).toContain("معاينة رسالة التقرير وملف PDF");
+    expect(exportSource).toContain("confirmWhatsAppShare");
+    expect(exportSource).toContain("downloadSharePdf");
+    expect(exportSource).toContain("اضغط إرسال يدويًا");
+  });
+
+  it("supports account-level WhatsApp preference and report sorting", () => {
+    expect(homeSource).toContain("accountWhatsAppOpen");
+    expect(homeSource).toContain("accountWhatsAppPhone");
+    expect(homeSource).toContain("حفظ رقم واتساب الافتراضي لهذا الحساب.");
+    expect(scheduledSource).toContain("readyReportSort");
+    expect(scheduledSource).toContain("الأحدث أولًا");
+    expect(scheduledSource).toContain("الأقدم أولًا");
+    expect(scheduledSource).toContain("sortedReadyReports");
   });
 
   it("does not reintroduce email delivery into the manual sharing path", () => {

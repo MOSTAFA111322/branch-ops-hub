@@ -536,6 +536,7 @@ function OperationsView({ section, user, onNavigate }: { section: string; user?:
 
 export default function Home() {
   const todayLabel = useMemo(() => new Intl.DateTimeFormat("ar-SA", { weekday: "long", day: "numeric", month: "long", year: "numeric" }).format(new Date()), []);
+  const { user } = useAuth();
   const [activeNav, setActiveNav] = useState("نظرة عامة");
   const [financialYear, setFinancialYear] = useState(new Date().getFullYear());
   const [financialMonth, setFinancialMonth] = useState(new Date().getMonth() + 1);
@@ -568,6 +569,26 @@ export default function Home() {
   const [query, setQuery] = useState("");
   const [showQuickAction, setShowQuickAction] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
+  const whatsappPreferenceKey = `branch-ops-whatsapp-default:${user?.openId ?? user?.id ?? "anonymous"}`;
+  const [accountWhatsAppOpen, setAccountWhatsAppOpen] = useState(false);
+  const [accountWhatsAppPhone, setAccountWhatsAppPhone] = useState("");
+  const [accountWhatsAppStatus, setAccountWhatsAppStatus] = useState("");
+  useEffect(() => {
+    try { setAccountWhatsAppPhone(localStorage.getItem(whatsappPreferenceKey) ?? ""); } catch { setAccountWhatsAppPhone(""); }
+  }, [whatsappPreferenceKey]);
+  const saveAccountWhatsAppPhone = () => {
+    const cleanPhone = accountWhatsAppPhone.replace(/[^\d]/g, "");
+    if (cleanPhone.length < 8 || cleanPhone.length > 15) {
+      setAccountWhatsAppStatus("أدخل رقم واتساب بصيغة دولية من 8 إلى 15 رقمًا، مثل 9665XXXXXXXX.");
+      return;
+    }
+    try { localStorage.setItem(whatsappPreferenceKey, cleanPhone); setAccountWhatsAppPhone(cleanPhone); setAccountWhatsAppStatus("تم حفظ رقم واتساب الافتراضي لهذا الحساب."); } catch { setAccountWhatsAppStatus("تعذر حفظ الرقم على هذا المتصفح."); }
+  };
+  const clearAccountWhatsAppPhone = () => {
+    try { localStorage.removeItem(whatsappPreferenceKey); } catch { /* local preference is optional */ }
+    setAccountWhatsAppPhone("");
+    setAccountWhatsAppStatus("تم حذف الرقم الافتراضي من هذا المتصفح.");
+  };
   const [showAllAlerts, setShowAllAlerts] = useState(false);
   const [alertPriorityFilter, setAlertPriorityFilter] = useState<"all" | "high" | "medium">("all");
   const [alertBranchFilter, setAlertBranchFilter] = useState("all");
@@ -590,7 +611,6 @@ export default function Home() {
     onSuccess: ({ answer }) => setAssistantMessages((current) => [...current, { role: "assistant", content: answer }]),
     onError: () => setAssistantMessages((current) => [...current, { role: "assistant", content: "تعذر الوصول إلى المساعد حاليًا. تحقق من الاتصال وحاول مرة أخرى." }]),
   });
-  const { user } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const usageLog = trpc.usage.log.useMutation();
   const { data: dashboardPreference } = trpc.preferences.getDashboard.useQuery(undefined, { enabled: Boolean(user) });
@@ -829,10 +849,11 @@ export default function Home() {
             <div className="flex items-center gap-2">
               <div className="relative hidden md:block"><Search className="absolute right-3 top-2.5 h-4 w-4 text-[#98a39a]" /><Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="ابحث عن فرع أو منطقة..." className="h-9 w-56 rounded-xl border-[#dce5dc] bg-white pr-9 text-xs shadow-none focus-visible:ring-[#6ea787]" /></div><Button variant="outline" className="hidden h-9 items-center gap-2 rounded-xl border-[#dce5dc] bg-white px-3 text-xs text-[#66736a] sm:flex" onClick={() => setCommandOpen(true)} aria-label="فتح البحث الموحد"><Search className="h-3.5 w-3.5" /> بحث موحد <kbd className="rounded border border-[#dce5dc] bg-[#f5f8f5] px-1.5 py-0.5 text-[10px]">⌘K</kbd></Button>
               <div className="relative"><Button variant="outline" size="icon" aria-label="فتح التنبيهات" className="h-9 w-9 rounded-xl border-[#dce5dc] bg-white text-[#66736a]" onClick={() => setShowNotifications((value) => !value)}><Bell className="h-4 w-4" />{dashboardAlerts.length > 0 && <span className="absolute mr-5 mt-[-15px] h-2 w-2 rounded-full bg-[#e48552]" />}</Button>{showNotifications && <div className="absolute left-0 top-11 z-40 w-80 rounded-2xl border border-[#dfe8df] bg-white p-3 text-right shadow-xl"><div className="mb-2 flex items-center justify-between"><p className="text-xs font-bold">التنبيهات الداخلية</p><span className="rounded-full bg-[#fff3df] px-2 py-1 text-[10px] text-[#a65d1b]">{dashboardAlerts.length} نشط</span></div>{dashboardAlerts.length ? <div className="space-y-2">{dashboardAlerts.slice(0, 5).map((alert) => <button key={alert.id} className="flex w-full items-start gap-2 rounded-xl p-2 text-right hover:bg-[#f7faf7]" onClick={() => { setShowNotifications(false); const branch = displayBranches.find((item) => item.id === alert.branchId); if (branch) setSelectedBranch(branch); setActiveNav(getAlertNavigationTarget(alert.kind)); }}>{(() => { const AlertIcon = alert.icon; return <AlertIcon className="mt-0.5 h-4 w-4 shrink-0 text-[#4d8068]" />; })()}<span><span className="block text-[11px] font-semibold">{alert.title}</span><span className="mt-0.5 block text-[10px] text-[#89948b]">{alert.detail}</span></span></button>)}</div> : <p className="py-5 text-center text-xs text-[#89948b]">لا توجد تنبيهات نشطة ضمن نطاقك.</p>}</div>}</div>
-              <div className="hidden h-9 items-center gap-2 rounded-xl border border-[#dce5dc] bg-white px-2.5 sm:flex"><div className="flex h-6 w-6 items-center justify-center rounded-lg bg-[#dcefe3] text-[10px] font-bold text-[#1f7555]">م</div><span className="text-xs font-semibold">مدير التشغيل</span><ChevronLeft className="h-3 w-3 rotate-[-90deg] text-[#9aa49c]" /></div>
+              <Button type="button" variant="outline" className="hidden h-9 items-center gap-2 rounded-xl border-[#dce5dc] bg-white px-2.5 text-[#42564a] sm:flex" onClick={() => { setAccountWhatsAppStatus(""); setAccountWhatsAppOpen(true); }} aria-label="فتح إعدادات الحساب"><div className="flex h-6 w-6 items-center justify-center rounded-lg bg-[#dcefe3] text-[10px] font-bold text-[#1f7555]">م</div><span className="text-xs font-semibold">مدير التشغيل</span><ChevronLeft className="h-3 w-3 rotate-[-90deg] text-[#9aa49c]" /></Button>
             </div>
           </div>
         </header>
+        {accountWhatsAppOpen && <div className="fixed inset-0 z-50 flex items-start justify-center bg-[#17352b]/30 p-4 pt-20 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="account-settings-title" onClick={() => setAccountWhatsAppOpen(false)}><div className="w-full max-w-md rounded-3xl border border-[#dfe8df] bg-white p-5 text-right shadow-2xl" dir="rtl" onClick={(event) => event.stopPropagation()}><div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold text-[#4d8068]">إعدادات الحساب</p><h2 id="account-settings-title" className="mt-1 text-lg font-bold text-[#17211b]">رقم واتساب الافتراضي</h2><p className="mt-1 text-xs leading-5 text-[#89948b]">يُستخدم لتعبئة المشاركة اليدوية للتقارير بسرعة. لا يتم إرسال أي رسالة تلقائيًا.</p></div><button type="button" className="rounded-xl p-2 text-[#8e9a91] hover:bg-[#f1f5f1]" onClick={() => setAccountWhatsAppOpen(false)} aria-label="إغلاق إعدادات الحساب"><X className="h-4 w-4" /></button></div><label className="mt-5 block text-xs font-semibold text-[#42564a]" htmlFor="account-whatsapp-phone">رقم واتساب بصيغة دولية<Input id="account-whatsapp-phone" value={accountWhatsAppPhone} onChange={(event) => { setAccountWhatsAppPhone(event.target.value); setAccountWhatsAppStatus(""); }} placeholder="9665XXXXXXXX" inputMode="tel" autoComplete="tel" className="mt-2 h-10 rounded-xl text-sm" /></label>{accountWhatsAppStatus && <p role="status" className={`mt-2 text-xs ${accountWhatsAppStatus.startsWith("تم") ? "text-[#2d7d58]" : "text-[#a25c3d]"}`}>{accountWhatsAppStatus}</p>}<div className="mt-5 flex flex-wrap justify-between gap-2"><Button type="button" variant="ghost" className="rounded-xl text-xs text-[#a25c3d]" onClick={clearAccountWhatsAppPhone} disabled={!accountWhatsAppPhone}>حذف الرقم المحفوظ</Button><div className="flex gap-2"><Button type="button" variant="outline" className="rounded-xl text-xs" onClick={() => setAccountWhatsAppOpen(false)}>إلغاء</Button><Button type="button" className="rounded-xl bg-[#174c3d] text-xs" onClick={saveAccountWhatsAppPhone}>حفظ الرقم</Button></div></div></div></div>}
 
         <div className="space-y-6 px-5 py-6 md:px-8 md:py-8">
           <section className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
