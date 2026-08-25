@@ -11,8 +11,11 @@ describe("executive dashboard enhancements", () => {
     expect(source).toContain("html2canvas");
     expect(source).toContain('pdf.output("blob")');
     expect(source).toContain("previewPdf");
-    expect(source).toContain("معاينة التقرير قبل التنزيل");
-    expect(source).toContain("الاتجاه الشهري");
+    expect(source).toContain("معاينة التقرير متعدد الصفحات قبل التنزيل");
+    expect(source).toContain("معاينة بيانات Excel المفلترة");
+    expect(source).toContain("pdf.addPage()");
+    expect(source).toContain("الاتجاه حسب الفترة");
+    expect(source).toContain("ملف تعريف التصدير");
   });
 
   it("provides a persisted theme toggle through the existing theme provider", () => {
