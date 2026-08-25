@@ -11,7 +11,7 @@ import { useTheme } from "@/contexts/ThemeContext";
 type TrendRow = { period: string; netSales?: number | string; revenue?: number | string; netCost?: number | string; expenses?: number | string; netProfit?: number | string };
 type BranchRow = { id: number; name: string; operationalType?: string; currentRevenue?: number | string | null; currentProfit?: number | string | null; currentExpenses?: number | string; operatingExpenses?: number | string; profitChangePercent?: number | string | null };
 export type ExecutiveDashboardData = { financialTrend?: TrendRow[]; financialByBranch?: BranchRow[]; financialCoverage?: { rate: number | null; centersWithData: number; expectedCenters: number; period: string } };
-type Props = { data?: ExecutiveDashboardData; disabled?: boolean; userKey?: string | number | null };
+type Props = { data?: ExecutiveDashboardData; disabled?: boolean; userKey?: string | number | null; userName?: string | null };
 type Favorite = { id: string; name: string; title: string; from: string; to: string; costCenter: string };
 type ExcelPreviewRow = Record<string, string | number>;
 
@@ -22,14 +22,14 @@ const FAVORITES_KEY = "branch-ops-executive-export-favorites";
 const WHATSAPP_KEY = "branch-ops-whatsapp-default";
 const READY_REPORTS_KEY = "branch-ops-ready-reports";
 
-export const getArabicTimeGreeting = (date = new Date()) => {
+export const getArabicTimeGreeting = (date = new Date(), userName?: string | null) => {
   const hour = date.getHours();
-  if (hour >= 5 && hour < 12) return "صباح الخير";
-  if (hour >= 12 && hour < 24) return "مساء الخير";
-  return "تحية طيبة";
+  const greeting = hour >= 5 && hour < 12 ? "صباح الخير" : hour >= 12 && hour < 24 ? "مساء الخير" : "تحية طيبة";
+  const cleanName = userName?.trim();
+  return cleanName ? `${greeting}، ${cleanName}` : greeting;
 };
 
-export default function ExecutiveDashboardExport({ data, disabled, userKey }: Props) {
+export default function ExecutiveDashboardExport({ data, disabled, userKey, userName }: Props) {
   const chartRef = useRef<HTMLDivElement>(null);
   const [exporting, setExporting] = useState<"pdf" | "excel" | null>(null);
   const [title, setTitle] = useState("التقرير التنفيذي المالي");
@@ -159,7 +159,9 @@ export default function ExecutiveDashboardExport({ data, disabled, userKey }: Pr
     } finally { setExporting(null); }
   };
 
-  const shareMessage = `${getArabicTimeGreeting()}،\n\nتقرير: ${title || "التقرير التنفيذي المالي"}\nالفترة: ${from || "كل الفترة"} إلى ${to || "كل الفترة"}\nمركز التكلفة: ${costCenter === "all" ? "كل المراكز" : costCenter}\nتم تجهيز التقرير للمراجعة والمشاركة اليدوية عبر واتساب.`;
+  const shareMessage = `${getArabicTimeGreeting(new Date(), userName)}
+
+${title}\n\nتقرير: ${title || "التقرير التنفيذي المالي"}\nالفترة: ${from || "كل الفترة"} إلى ${to || "كل الفترة"}\nمركز التكلفة: ${costCenter === "all" ? "كل المراكز" : costCenter}\nتم تجهيز التقرير للمراجعة والمشاركة اليدوية عبر واتساب.`;
   const saveWhatsAppPhone = (value: string) => {
     setWhatsAppPhone(value);
     try { localStorage.setItem(whatsappPreferenceKey, value); } catch { /* local preference is optional */ }

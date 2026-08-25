@@ -208,3 +208,21 @@
     text-align: right;
   }
 }
+
+@media (prefers-reduced-motion: no-preference) {
+  .branchhub-status-success-dismiss {
+    animation: branchhub-status-success-dismiss 4.2s cubic-bezier(0.23, 1, 0.32, 1) forwards;
+    transform-origin: right center;
+  }
+
+  @keyframes branchhub-status-success-dismiss {
+    0% { opacity: 0; transform: translateY(-3px); }
+    12% { opacity: 1; transform: translateY(0); }
+    76% { opacity: 1; transform: translateY(0); }
+    100% { opacity: 0; transform: translateY(-3px); }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .branchhub-status-success-dismiss { opacity: 1; }
+}

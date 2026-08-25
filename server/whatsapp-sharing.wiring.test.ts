@@ -6,6 +6,7 @@ const root = path.resolve(process.cwd());
 const exportSource = fs.readFileSync(path.join(root, "client/src/components/ExecutiveDashboardExport.tsx"), "utf8");
 const scheduledSource = fs.readFileSync(path.join(root, "client/src/components/ScheduledReportsView.tsx"), "utf8");
 const homeSource = fs.readFileSync(path.join(root, "client/src/pages/Home.tsx"), "utf8");
+const stylesSource = fs.readFileSync(path.join(root, "client/src/index.css"), "utf8");
 
 describe("manual WhatsApp report sharing", () => {
   it("provides an explicit manual WhatsApp action and international phone validation", () => {
@@ -44,13 +45,27 @@ describe("manual WhatsApp report sharing", () => {
     expect(homeSource).toContain("sonnerToast.success");
     expect(homeSource).toContain("تم حفظ رقم واتساب الافتراضي");
     expect(scheduledSource).toContain("exportReadyReportsCsv");
-    expect(scheduledSource).toContain("تصدير CSV كامل");
+    expect(scheduledSource).toContain("تصدير CSV حسب الفلاتر");
     expect(scheduledSource).toContain("text/csv;charset=utf-8");
     expect(scheduledSource).toContain("String.fromCharCode(0xfeff)");
     expect(exportSource).toContain("getArabicTimeGreeting");
     expect(exportSource).toContain("صباح الخير");
     expect(exportSource).toContain("مساء الخير");
     expect(exportSource).toContain("تحية طيبة");
+  });
+
+  it("keeps the CSV date scope, personal greeting, and success dismissal wired", () => {
+    expect(scheduledSource).toContain("readyReportDateFrom");
+    expect(scheduledSource).toContain("readyReportDateTo");
+    expect(scheduledSource).toContain('type="date"');
+    expect(scheduledSource).toContain("sortedReadyReports");
+    expect(exportSource).toContain("userName?: string | null");
+    expect(exportSource).toContain("getArabicTimeGreeting(new Date(), userName)");
+    expect(homeSource).toContain("userName={user?.name ?? null}");
+    expect(homeSource).toContain("branchhub-status-success-dismiss");
+    expect(homeSource).toContain("window.setTimeout");
+    expect(stylesSource).toContain("prefers-reduced-motion: no-preference");
+    expect(stylesSource).toContain("branchhub-status-success-dismiss");
   });
 
   it("does not reintroduce email delivery into the manual sharing path", () => {
