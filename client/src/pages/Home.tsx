@@ -73,6 +73,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
+import { toast as sonnerToast } from "sonner";
 
 type IncomeImportRow = { branchId: number; year: number; month: number; revenue: number; salesReturns: number; costOfGoods: number; costReturns: number; operatingExpenses: number; notes?: string; sourceRow: number };
 const normalizeIncomeNumber = normalizeImportedAmount;
@@ -582,7 +583,15 @@ export default function Home() {
       setAccountWhatsAppStatus("أدخل رقم واتساب بصيغة دولية من 8 إلى 15 رقمًا، مثل 9665XXXXXXXX.");
       return;
     }
-    try { localStorage.setItem(whatsappPreferenceKey, cleanPhone); setAccountWhatsAppPhone(cleanPhone); setAccountWhatsAppStatus("تم حفظ رقم واتساب الافتراضي لهذا الحساب."); } catch { setAccountWhatsAppStatus("تعذر حفظ الرقم على هذا المتصفح."); }
+    try {
+      localStorage.setItem(whatsappPreferenceKey, cleanPhone);
+      setAccountWhatsAppPhone(cleanPhone);
+      setAccountWhatsAppStatus("تم حفظ رقم واتساب الافتراضي لهذا الحساب.");
+      sonnerToast.success("تم حفظ رقم واتساب الافتراضي", { description: "سيتم استخدامه تلقائيًا عند تجهيز مشاركة التقارير." });
+    } catch {
+      setAccountWhatsAppStatus("تعذر حفظ الرقم على هذا المتصفح.");
+      sonnerToast.error("تعذر حفظ رقم واتساب", { description: "تحقق من صلاحية التخزين في المتصفح ثم حاول مرة أخرى." });
+    }
   };
   const clearAccountWhatsAppPhone = () => {
     try { localStorage.removeItem(whatsappPreferenceKey); } catch { /* local preference is optional */ }

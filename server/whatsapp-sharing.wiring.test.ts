@@ -40,6 +40,19 @@ describe("manual WhatsApp report sharing", () => {
     expect(scheduledSource).toContain("sortedReadyReports");
   });
 
+  it("provides visible account feedback, a complete Arabic-safe CSV export, and time-based greeting", () => {
+    expect(homeSource).toContain("sonnerToast.success");
+    expect(homeSource).toContain("تم حفظ رقم واتساب الافتراضي");
+    expect(scheduledSource).toContain("exportReadyReportsCsv");
+    expect(scheduledSource).toContain("تصدير CSV كامل");
+    expect(scheduledSource).toContain("text/csv;charset=utf-8");
+    expect(scheduledSource).toContain("String.fromCharCode(0xfeff)");
+    expect(exportSource).toContain("getArabicTimeGreeting");
+    expect(exportSource).toContain("صباح الخير");
+    expect(exportSource).toContain("مساء الخير");
+    expect(exportSource).toContain("تحية طيبة");
+  });
+
   it("does not reintroduce email delivery into the manual sharing path", () => {
     expect(exportSource).not.toContain("mailto:");
     expect(scheduledSource).not.toContain("mailto:");

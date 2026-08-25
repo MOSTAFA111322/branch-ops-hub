@@ -22,6 +22,13 @@ const FAVORITES_KEY = "branch-ops-executive-export-favorites";
 const WHATSAPP_KEY = "branch-ops-whatsapp-default";
 const READY_REPORTS_KEY = "branch-ops-ready-reports";
 
+export const getArabicTimeGreeting = (date = new Date()) => {
+  const hour = date.getHours();
+  if (hour >= 5 && hour < 12) return "صباح الخير";
+  if (hour >= 12 && hour < 24) return "مساء الخير";
+  return "تحية طيبة";
+};
+
 export default function ExecutiveDashboardExport({ data, disabled, userKey }: Props) {
   const chartRef = useRef<HTMLDivElement>(null);
   const [exporting, setExporting] = useState<"pdf" | "excel" | null>(null);
@@ -152,7 +159,7 @@ export default function ExecutiveDashboardExport({ data, disabled, userKey }: Pr
     } finally { setExporting(null); }
   };
 
-  const shareMessage = `تقرير: ${title || "التقرير التنفيذي المالي"}\nالفترة: ${from || "كل الفترة"} إلى ${to || "كل الفترة"}\nمركز التكلفة: ${costCenter === "all" ? "كل المراكز" : costCenter}\nتم تجهيز التقرير للمراجعة والمشاركة اليدوية عبر واتساب.`;
+  const shareMessage = `${getArabicTimeGreeting()}،\n\nتقرير: ${title || "التقرير التنفيذي المالي"}\nالفترة: ${from || "كل الفترة"} إلى ${to || "كل الفترة"}\nمركز التكلفة: ${costCenter === "all" ? "كل المراكز" : costCenter}\nتم تجهيز التقرير للمراجعة والمشاركة اليدوية عبر واتساب.`;
   const saveWhatsAppPhone = (value: string) => {
     setWhatsAppPhone(value);
     try { localStorage.setItem(whatsappPreferenceKey, value); } catch { /* local preference is optional */ }

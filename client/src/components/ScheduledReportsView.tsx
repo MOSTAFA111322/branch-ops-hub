@@ -131,6 +131,28 @@ export function ScheduledReportsView({ canRetry = false }: { canRetry?: boolean 
     XLSX.utils.book_append_sheet(workbook, worksheet, "سجل التنفيذ");
     XLSX.writeFile(workbook, `سجل-التقارير-${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
+  const exportReadyReportsCsv = () => {
+    const headers = ["المعرّف", "عنوان التقرير", "الفترة", "مركز التكلفة", "رقم واتساب", "تاريخ الإنشاء", "تاريخ الإنشاء ISO", "الحالة"];
+    const rows = readyReports.map((report) => [
+      report.id,
+      report.title || "تقرير تنفيذي مالي",
+      report.period,
+      report.costCenter === "all" ? "كل المراكز" : report.costCenter,
+      report.phone,
+      report.createdAt ? new Date(report.createdAt).toLocaleString("ar-SA") : "",
+      report.createdAt,
+      report.status,
+    ]);
+    const csvCell = (value: unknown) => `"${String(value ?? "").replace(/"/g, '""')}"`;
+    const csv = `${String.fromCharCode(0xfeff)}${[headers, ...rows].map((row) => row.map(csvCell).join(",")).join(String.fromCharCode(13, 10))}`;
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `سجل-التقارير-الجاهزة-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
 
   return (
     <div className="space-y-4" dir="rtl">
@@ -144,7 +166,7 @@ export function ScheduledReportsView({ canRetry = false }: { canRetry?: boolean 
         </CardContent>
       </Card>
       <Card className="border-[#dfe9df] bg-white shadow-[0_5px_18px_rgba(39,70,48,0.04)]" aria-labelledby="ready-reports-title">
-        <CardHeader><div className="flex items-center justify-between gap-2"><div><CardTitle id="ready-reports-title" className="flex items-center gap-2 text-base"><FileText className="h-4 w-4 text-[#4d8068]" /> التقارير الجاهزة للمشاركة</CardTitle><p className="mt-1 text-xs text-[#89948b]">تُنشأ الجدولة التقرير وتحفظه هنا. المشاركة عبر واتساب العادي يدوية: يفتح النظام المحادثة والرسالة، ثم يضغط المستخدم إرسال ويرفق PDF عند الحاجة.</p></div><Badge variant="outline" className="rounded-full text-[10px]">{readyReports.length} تقرير</Badge></div></CardHeader>
+        <CardHeader><div className="flex flex-wrap items-start justify-between gap-3"><div><CardTitle id="ready-reports-title" className="flex items-center gap-2 text-base"><FileText className="h-4 w-4 text-[#4d8068]" /> التقارير الجاهزة للمشاركة</CardTitle><p className="mt-1 text-xs text-[#89948b]">تُنشأ الجدولة التقرير وتحفظه هنا. المشاركة عبر واتساب العادي يدوية: يفتح النظام المحادثة والرسالة، ثم يضغط المستخدم إرسال ويرفق PDF عند الحاجة.</p></div><div className="flex flex-wrap items-center gap-2"><Badge variant="outline" className="rounded-full text-[10px]">{readyReports.length} تقرير</Badge><Button size="sm" variant="outline" className="gap-1 rounded-xl text-[11px]" onClick={exportReadyReportsCsv} disabled={readyReports.length === 0} aria-label="تصدير سجل التقارير الجاهزة إلى CSV"><Download className="h-3.5 w-3.5" />تصدير CSV كامل</Button></div></div></CardHeader>
         <CardContent>
           {readyReports.length === 0 ? <p className="rounded-xl bg-[#f7faf7] p-4 text-center text-xs text-[#89948b]">لا توجد تقارير جاهزة للمشاركة بعد.</p> : <>
             <div className="mb-3 grid gap-2 rounded-xl bg-[#f7faf7] p-3 sm:grid-cols-2 lg:grid-cols-4"><label className="relative sm:col-span-2"><Search className="absolute right-3 top-2.5 h-4 w-4 text-[#89948b]" /><Input value={readyReportSearch} onChange={(event) => setReadyReportSearch(event.target.value)} placeholder="بحث في العنوان والفترة والمركز" className="h-9 rounded-lg pr-9 text-xs" aria-label="بحث في التقارير الجاهزة" /></label><select value={readyReportType} onChange={(event) => setReadyReportType(event.target.value)} className="h-9 rounded-lg border border-input bg-background px-2 text-xs" aria-label="نوع التقرير"><option value="all">كل أنواع التقارير</option>{readyReportTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select><label className="flex items-center gap-1 rounded-lg border border-input bg-background px-2"><span className="sr-only">ترتيب سجل التقارير</span>{readyReportSort === "newest" ? <ArrowDownAZ className="h-3.5 w-3.5 text-[#4d8068]" /> : <ArrowUpAZ className="h-3.5 w-3.5 text-[#4d8068]" />}<select value={readyReportSort} onChange={(event) => setReadyReportSort(event.target.value as typeof readyReportSort)} className="h-8 bg-transparent text-xs outline-none" aria-label="ترتيب سجل التقارير"><option value="newest">الأحدث أولًا</option><option value="oldest">الأقدم أولًا</option></select></label><div className="flex gap-2">
