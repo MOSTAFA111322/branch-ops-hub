@@ -9,7 +9,9 @@ describe("executive dashboard enhancements", () => {
     const source = readFileSync(resolve(root, "client/src/components/ExecutiveDashboardExport.tsx"), "utf8");
     expect(source).toContain("XLSX.writeFile");
     expect(source).toContain("html2canvas");
-    expect(source).toContain("pdf.save");
+    expect(source).toContain('pdf.output("blob")');
+    expect(source).toContain("previewPdf");
+    expect(source).toContain("معاينة التقرير قبل التنزيل");
     expect(source).toContain("الاتجاه الشهري");
   });
 
