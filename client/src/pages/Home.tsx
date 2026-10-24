@@ -119,6 +119,7 @@ function canAccessNav(label: string, role?: string) {
   if (label === "سجل التدقيق" || label === "سجل التصديرات" || label === "تحليلات الاستخدام" || label === "إدارة التقارير الدورية" || label === "جودة البيانات والالتزام") return role === "admin" || role === "area_manager";
   if (label === "صلاحيات الفروع" || label === "إدارة الحسابات" || label === "استيراد إحداثيات الخريطة" || label === "اختبار التقارير" || label === "النسخ الاحتياطي والاستعادة") return role === "admin";
   if (!role || role === "admin" || role === "area_manager") return true;
+  if (role === "financial_manager") return ["نظرة عامة", "الفروع", "التقارير", "البيانات المالية", "المهام والطلبات", "الطلبات الداخلية"].includes(label);
   if (role === "branch_manager") return !["التقارير"].includes(label);
   if (role === "quality") return ["نظرة عامة", "الفروع", "الزيارات والفحص", "الإجراءات والتحسين", "الوثائق والتراخيص", "الجودة والشكاوى"].includes(label);
   if (role === "maintenance") return ["نظرة عامة", "الفروع", "الإجراءات والتحسين", "الصيانة والأصول"].includes(label);

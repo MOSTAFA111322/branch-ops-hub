@@ -127,7 +127,7 @@ export async function getOperationsOverview(user: Pick<User, "id" | "role" | "re
   ]);
   const scopedTasks = user.role === "admin" ? taskRows : taskRows.filter((row: any) => row.assigneeId === user.id);
   const scopedPreviousTasks = user.role === "admin" ? previousTaskRows : previousTaskRows.filter((row: any) => row.assigneeId === user.id);
-  const scopedRequests = user.role === "admin" ? requestRows : requestRows.filter((row: any) => row.requesterId === user.id);
+  const scopedRequests = user.role === "admin" || user.role === "financial_manager" ? requestRows.filter((row: any) => row.branchId == null || ids.includes(row.branchId)) : requestRows.filter((row: any) => row.requesterId === user.id);
   const activityRows = [...visitsRows, ...actionRows, ...qualityRows, ...maintenanceRows, ...scopedRequests, ...scopedTasks] as Array<{ branchId?: number | null }>;
   const qualityCounts = new Map<string, { cause: string; count: number; open: number }>();
   for (const row of qualityRows as Array<{ rootCause?: string | null; category?: string | null; status?: string | null }>) {

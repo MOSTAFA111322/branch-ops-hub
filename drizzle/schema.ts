@@ -11,7 +11,7 @@ export const users = mysqlTable("users", {
   failedLoginAttempts: int("failedLoginAttempts").default(0).notNull(),
   lockedUntil: timestamp("lockedUntil"),
   lastLocalSignIn: timestamp("lastLocalSignIn"),
-  role: mysqlEnum("role", ["user", "admin", "area_manager", "branch_manager", "quality", "maintenance", "warehouse", "factory"]).default("user").notNull(),
+  role: mysqlEnum("role", ["user", "admin", "area_manager", "branch_manager", "financial_manager", "quality", "maintenance", "warehouse", "factory"]).default("user").notNull(),
   regionId: int("regionId"),
   branchId: int("branchId"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),

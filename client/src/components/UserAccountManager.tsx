@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 
 const roles = [
   ["user", "مستخدم"], ["admin", "مدير نظام"], ["area_manager", "مدير منطقة"],
-  ["branch_manager", "مدير فرع"], ["quality", "الجودة"], ["maintenance", "الصيانة"],
+  ["branch_manager", "مدير فرع"], ["financial_manager", "المدير المالي"], ["quality", "الجودة"], ["maintenance", "الصيانة"],
   ["warehouse", "المستودعات"], ["factory", "المصنع"],
 ] as const;
 type Role = (typeof roles)[number][0];
