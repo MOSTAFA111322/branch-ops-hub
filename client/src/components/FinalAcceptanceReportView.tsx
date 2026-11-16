@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { CheckCircle2, FileText, LockKeyhole, Printer, ShieldCheck, UsersRound } from "lucide-react";
+import jsPDF from "jspdf";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 
@@ -17,6 +18,57 @@ const roleLabels: Record<string, string> = {
 
 function formatNumber(value: number | string | null | undefined) {
   return Number(value ?? 0).toLocaleString("ar-SA", { maximumFractionDigits: 2 });
+}
+
+function exportAcceptancePdf(values: {
+  issuedAt: string;
+  activeBranches: number;
+  totalBranches: number;
+  activeUsers: number;
+  visiblePermissions: number;
+  latestPeriod: string;
+  revenue: number;
+  netProfit: number;
+  financialManagers: number;
+}) {
+  const doc = new jsPDF({ unit: "mm", format: "a4" });
+  doc.setFillColor(23, 76, 61);
+  doc.rect(0, 0, 210, 30, "F");
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(16);
+  doc.text("Branch Operations Hub", 18, 13);
+  doc.setFontSize(11);
+  doc.text("Final Acceptance Report", 18, 21);
+  doc.setTextColor(23, 61, 49);
+  doc.setFontSize(12);
+  doc.text("Final acceptance report for general manager", 18, 44);
+  doc.setFontSize(9);
+  doc.setTextColor(82, 99, 89);
+  doc.text(`Issued: ${values.issuedAt}`, 18, 52);
+  const rows = [
+    ["Active branches", `${values.activeBranches} / ${values.totalBranches}`],
+    ["Active accounts", String(values.activeUsers)],
+    ["Branch-view permissions", String(values.visiblePermissions)],
+    ["Financial managers", String(values.financialManagers)],
+    ["Latest financial period", values.latestPeriod],
+    ["Revenue", `${formatNumber(values.revenue)} SAR`],
+    ["Net profit", `${formatNumber(values.netProfit)} SAR`],
+  ];
+  let y = 68;
+  rows.forEach(([label, value]) => {
+    doc.setDrawColor(220, 233, 221);
+    doc.line(18, y + 4, 192, y + 4);
+    doc.setTextColor(23, 61, 49);
+    doc.setFontSize(10);
+    doc.text(label, 18, y);
+    doc.setTextColor(82, 99, 89);
+    doc.text(value, 192, y, { align: "right" });
+    y += 11;
+  });
+  doc.setTextColor(82, 99, 89);
+  doc.setFontSize(9);
+  doc.text("Review scope, permissions, and financial figures before official launch.", 18, y + 12);
+  doc.save(`final-acceptance-report-${new Date().toISOString().slice(0, 10)}.pdf`);
 }
 
 export function FinalAcceptanceReportView() {
@@ -65,7 +117,10 @@ export function FinalAcceptanceReportView() {
 
       <div className="flex flex-col justify-between gap-4 md:flex-row md:items-start print:hidden">
         <div><p className="text-xs font-semibold text-[#4d8068]">بوابة ما قبل الإطلاق</p><h2 id="final-acceptance-title" className="mt-1 text-xl font-bold text-[#173d31]">تقرير القبول النهائي</h2><p className="mt-1 max-w-3xl text-xs leading-6 text-[#89948b]">ملخص قابل للمراجعة والتوقيع يوضح حالة الحسابات والصلاحيات والأرقام الفعلية قبل الاعتماد الرسمي.</p></div>
-        <Button type="button" variant="outline" className="rounded-xl text-xs" onClick={() => window.print()}><Printer className="ml-2 h-4 w-4" /> تصدير للطباعة</Button>
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" variant="outline" className="rounded-xl text-xs" onClick={() => window.print()}><Printer className="ml-2 h-4 w-4" /> طباعة</Button>
+          <Button type="button" className="rounded-xl bg-[#174c3d] text-xs" onClick={() => exportAcceptancePdf({ issuedAt: now.toLocaleDateString("ar-SA"), activeBranches, totalBranches, activeUsers, visiblePermissions, latestPeriod: financialTotals.latestPeriod, revenue: financialTotals.revenue, netProfit: financialTotals.netProfit, financialManagers: financialManagers.length })}><FileText className="ml-2 h-4 w-4" /> تصدير PDF</Button>
+        </div>
       </div>
 
       {isLoading && <div className="rounded-xl border border-[#cde1d3] bg-[#edf8f0] p-4 text-xs text-[#276b48]" role="status">جارٍ تحميل بيانات القبول من النظام...</div>}

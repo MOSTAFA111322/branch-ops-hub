@@ -14,13 +14,24 @@ describe("final acceptance report wiring", () => {
     expect(home).toContain("<FinalAcceptanceReportView />");
   });
 
-  it("uses live protected procedures and provides print export", () => {
+  it("uses live protected procedures and provides print and PDF export", () => {
     expect(report).toContain("trpc.dashboard.summary.useQuery");
     expect(report).toContain("trpc.ops.overview.useQuery");
     expect(report).toContain("trpc.users.adminList.useQuery");
     expect(report).toContain("trpc.permissions.list.useQuery");
     expect(report).toContain("window.print()");
+    expect(report).toContain("exportAcceptancePdf");
+    expect(report).toContain("doc.save(");
     expect(report).not.toContain("passwordHash");
+  });
+
+  it("shows the financial manager pending-request panel and approval feedback", () => {
+    expect(home).toContain("طلبات الصرف بانتظار الاعتماد");
+    expect(home).toContain("pendingRequestRows");
+    expect(home).toContain("تم اعتماد طلب الصرف بنجاح");
+    expect(home).toContain("تم رفض طلب الصرف");
+    expect(home).toContain("جارٍ تحديث الحالة");
+    expect(home).toContain("animate-spin");
   });
 
   it("keeps financial manager role in the local account contract", () => {
