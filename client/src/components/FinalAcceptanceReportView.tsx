@@ -20,7 +20,20 @@ function formatNumber(value: number | string | null | undefined) {
   return Number(value ?? 0).toLocaleString("ar-SA", { maximumFractionDigits: 2 });
 }
 
-function exportAcceptancePdf(values: {
+const acceptanceLogoUrl = import.meta.env.VITE_APP_LOGO as string | undefined;
+
+function loadAcceptanceLogo() {
+  return new Promise<string | null>((resolve) => {
+    if (!acceptanceLogoUrl) return resolve(null);
+    const image = new Image();
+    image.crossOrigin = "anonymous";
+    image.onload = () => resolve(image.src);
+    image.onerror = () => resolve(null);
+    image.src = acceptanceLogoUrl;
+  });
+}
+
+async function exportAcceptancePdf(values: {
   issuedAt: string;
   activeBranches: number;
   totalBranches: number;
@@ -32,8 +45,20 @@ function exportAcceptancePdf(values: {
   financialManagers: number;
 }) {
   const doc = new jsPDF({ unit: "mm", format: "a4" });
+  const logo = await loadAcceptanceLogo();
   doc.setFillColor(23, 76, 61);
   doc.rect(0, 0, 210, 30, "F");
+  let logoAdded = false;
+  if (logo) {
+    try { doc.addImage(logo, "PNG", 168, 5, 25, 20); logoAdded = true; } catch { /* fallback to the branded badge below */ }
+  }
+  if (!logoAdded) {
+    doc.setFillColor(255, 255, 255);
+    doc.circle(181, 15, 9, "F");
+    doc.setTextColor(23, 76, 61);
+    doc.setFontSize(9);
+    doc.text("BOH", 181, 17, { align: "center" });
+  }
   doc.setTextColor(255, 255, 255);
   doc.setFontSize(16);
   doc.text("Branch Operations Hub", 18, 13);
@@ -44,7 +69,7 @@ function exportAcceptancePdf(values: {
   doc.text("Final acceptance report for general manager", 18, 44);
   doc.setFontSize(9);
   doc.setTextColor(82, 99, 89);
-  doc.text(`Issued: ${values.issuedAt}`, 18, 52);
+  doc.text(`Created: ${values.issuedAt}`, 18, 52);
   const rows = [
     ["Active branches", `${values.activeBranches} / ${values.totalBranches}`],
     ["Active accounts", String(values.activeUsers)],
@@ -119,7 +144,7 @@ export function FinalAcceptanceReportView() {
         <div><p className="text-xs font-semibold text-[#4d8068]">بوابة ما قبل الإطلاق</p><h2 id="final-acceptance-title" className="mt-1 text-xl font-bold text-[#173d31]">تقرير القبول النهائي</h2><p className="mt-1 max-w-3xl text-xs leading-6 text-[#89948b]">ملخص قابل للمراجعة والتوقيع يوضح حالة الحسابات والصلاحيات والأرقام الفعلية قبل الاعتماد الرسمي.</p></div>
         <div className="flex flex-wrap gap-2">
           <Button type="button" variant="outline" className="rounded-xl text-xs" onClick={() => window.print()}><Printer className="ml-2 h-4 w-4" /> طباعة</Button>
-          <Button type="button" className="rounded-xl bg-[#174c3d] text-xs" onClick={() => exportAcceptancePdf({ issuedAt: now.toLocaleDateString("ar-SA"), activeBranches, totalBranches, activeUsers, visiblePermissions, latestPeriod: financialTotals.latestPeriod, revenue: financialTotals.revenue, netProfit: financialTotals.netProfit, financialManagers: financialManagers.length })}><FileText className="ml-2 h-4 w-4" /> تصدير PDF</Button>
+          <Button type="button" className="rounded-xl bg-[#174c3d] text-xs" onClick={() => void exportAcceptancePdf({ issuedAt: new Intl.DateTimeFormat("ar-SA", { dateStyle: "medium", timeStyle: "short" }).format(new Date()), activeBranches, totalBranches, activeUsers, visiblePermissions, latestPeriod: financialTotals.latestPeriod, revenue: financialTotals.revenue, netProfit: financialTotals.netProfit, financialManagers: financialManagers.length })}><FileText className="ml-2 h-4 w-4" /> تصدير PDF</Button>
         </div>
       </div>
 

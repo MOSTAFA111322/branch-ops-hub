@@ -22,12 +22,18 @@ describe("final acceptance report wiring", () => {
     expect(report).toContain("window.print()");
     expect(report).toContain("exportAcceptancePdf");
     expect(report).toContain("doc.save(");
+    expect(report).toContain("acceptanceLogoUrl");
+    expect(report).toContain("Created:");
     expect(report).not.toContain("passwordHash");
   });
 
   it("shows the financial manager pending-request panel and approval feedback", () => {
     expect(home).toContain("طلبات الصرف بانتظار الاعتماد");
     expect(home).toContain("pendingRequestRows");
+    expect(home).toContain("تصفية طلبات الصرف حسب الأولوية");
+    expect(home).toContain("تصفية طلبات الصرف حسب الفرع");
+    expect(home).toContain("تأكيد رفض طلب الصرف");
+    expect(home).toContain("تأكيد الرفض");
     expect(home).toContain("تم اعتماد طلب الصرف بنجاح");
     expect(home).toContain("تم رفض طلب الصرف");
     expect(home).toContain("جارٍ تحديث الحالة");
